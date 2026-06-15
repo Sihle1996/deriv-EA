@@ -58,20 +58,23 @@ def replay(symbol: str, candles: list[dict]) -> list:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("symbol", nargs="?", default=CONFIG.symbol)
+    ap.add_argument("symbol", nargs="?", default=None, help="symbol (positional)")
+    ap.add_argument("--symbol", dest="symbol_flag", default=None,
+                    help="symbol (flag form, for consistency with the other tools)")
     ap.add_argument("--dry-run", action="store_true", help="report only; write nothing (read-only)")
     args = ap.parse_args()
+    symbol = args.symbol_flag or args.symbol or CONFIG.symbol
 
-    epochs, prices = rv._load_ticks(args.symbol)
+    epochs, prices = rv._load_ticks(symbol)
     if epochs is None:
-        raise SystemExit(f"no tick archive under {CONFIG.tick_dir / args.symbol}")
+        raise SystemExit(f"no tick archive under {CONFIG.tick_dir / symbol}")
     candles = build_candles(epochs, prices)
-    records = replay(args.symbol, candles)
-    print(f"symbol: {args.symbol}   ticks: {epochs.size:,}   candles: {len(candles)}   "
+    records = replay(symbol, candles)
+    print(f"symbol: {symbol}   ticks: {epochs.size:,}   candles: {len(candles)}   "
           f"signals regenerated: {len(records)}")
     print("(tip: run check_archive.py first - gaps in the tick archive become holes here too)")
 
-    store = SignalStore(CONFIG.signal_dir, args.symbol, CONFIG.signal_flush_every)
+    store = SignalStore(CONFIG.signal_dir, symbol, CONFIG.signal_flush_every)
     if args.dry_run:
         # Count how many are NOT already on disk, without writing anything.
         new = 0
@@ -89,7 +92,7 @@ def main() -> None:
     added = sum(store.append(r) for r in records)
     store.close()
     print(f"wrote {added} new signals, skipped {len(records) - added} already logged "
-          f"-> data/signals/{args.symbol}/")
+          f"-> data/signals/{symbol}/")
 
 
 if __name__ == "__main__":
