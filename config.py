@@ -76,6 +76,12 @@ class Config:
     bt_payout_ratio: float = 0.95      # Rise/Fall WIN profit per unit stake. ASSUMPTION — real
                                        # payouts vary by symbol/duration (fetch via proposal API later).
     bt_stake: float = 1.0              # stake per simulated trade (unit stake)
+    # validate_signals.py (honest statistical validation — treat any edge as a null to disprove)
+    n_permutations: int = 2000         # Monte-Carlo null draws for the permutation test
+    walk_forward_oos_frac: float = 0.30  # fraction of (time-ordered) trades held out as out-of-sample
+    cscv_blocks: int = 10              # S: time blocks for CSCV / Probability of Backtest Overfitting
+    validate_contraction_pcts: tuple = (0.10, 0.15, 0.20, 0.25, 0.30)  # param sweep for PBO
+    validate_breakout_mults: tuple = (0.5, 1.0, 1.5)                    # param sweep for PBO
 
     # --- storage ------------------------------------------------------------------
     data_dir: Path = ROOT / "data"

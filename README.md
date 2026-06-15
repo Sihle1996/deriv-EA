@@ -52,6 +52,8 @@ python verify_signals.py # Phase 2 detector regression (offline, deterministic)
 python review_signals.py # Phase 2: forward outcomes + null-model comparison (the real deliverable)
 python backfill_signals.py --dry-run  # regenerate the complete signal set from the tick archive
 python backtest_signals.py            # simulate Rise/Fall trades + P&L vs a null model (the money question)
+python validate_signals.py            # honest stats: permutation p-value, walk-forward, PBO/CSCV, deflated Sharpe
+python verify_validation.py           # unit-tests the validation math on known-truth inputs
 ```
 
 `main.py` runs both phases at once: it persists every tick **and**, on each candle close, feeds the
@@ -99,6 +101,8 @@ compares to a **null model** of random entries. If real ≈ random, there's no e
 | `review_signals.py` | Phase 2 outcome measurement: forward returns vs a null model |
 | `backfill_signals.py` | regenerate the complete signal set from the gap-free tick archive (recovers any signals missed during outages; deduped vs the live log) |
 | `backtest_signals.py` | contract-economics backtester — simulates Rise/Fall trades from signals, applies the payout haircut, reports P&L/ROI vs a null model (answers "would it make money?") |
+| `validate_signals.py` | honest statistical validation — Monte-Carlo permutation test, walk-forward IS/OOS, PBO via CSCV, deflated Sharpe (answers "is any edge real or overfit luck?") |
+| `verify_validation.py` | unit-tests the validation statistics on known-truth inputs |
 
 ## Dashboard (read-only research viewer)
 
@@ -131,7 +135,10 @@ reuses `deriv_client`/`candles`), `dashboard/readers.py` (signals/backtest/healt
 - **Phase 1 (data spine) — PASSED.** 24h soak: 100% gap-free archive, `verify_feed.py` 4/4.
 - **Phase 2 (signal research) — current.** Collect signals with `main.py`, review with
   `review_signals.py`. Still **no trading**.
-- **Gate before Phase 3 (trading):** > 500 reviewed signals **and** a null-model comparison showing
-  a demonstrated, repeatable edge. On a CSPRNG synthetic the expected result is *no edge* → stay in
-  research. That negative result is the point — it proves the patterns are noise before any money
-  is risked. No trade-execution code is written until this gate is cleared.
+- **Gate before Phase 3 (trading):** > 500 reviewed signals **and** `validate_signals.py` showing a
+  demonstrated, repeatable edge — permutation **p < 0.05**, out-of-sample survival, **low PBO**, and a
+  best-config Sharpe above the deflated/expected-max hurdle. On a CSPRNG synthetic the expected result
+  is *no edge* → stay in research. That negative result is the point. No trade-execution code is
+  written until this gate is cleared. (A deep-research pass — 25 primary-sourced claims, 0 refuted —
+  confirmed neither SMC nor the Forex Master Pattern has verifiable edge, and that on RNG synthetics
+  it's impossible by construction; the honest improvement is rigorous testing, not a better pattern.)

@@ -123,6 +123,8 @@ Volatility contraction/expansion detector on 1m + 5m. Plan: `.claude/plans/index
 | `verify_signals.py` | offline detector regression — **11/11 PASS** (transitions, warm-up, timeout, hysteresis, dedup, closed/partial-bar) |
 | `review_signals.py` | offline outcome measurement: forward returns/MFE/MAE/first-touch vs a **null model**, look-ahead firewall (`epoch > bar_close_epoch`), per-signal CSV |
 | `backfill_signals.py` | regenerate the COMPLETE signal set offline from the gap-free tick archive (replay store+engine), deduped vs the live log — recovers signals the live detector missed during outages. `--dry-run` is read-only. |
+| `validate_signals.py` | **honest statistical validation** (the research-mandated "fix"): Monte-Carlo permutation test (p-value vs random entries), walk-forward IS/OOS, **PBO via CSCV** (Bailey/López de Prado), deflated/expected-max Sharpe. Vectorized `_fast_pnl_series` (rolling indicators computed once → real detector) makes the param sweep O(n)/config. Prints a LOW-POWER caveat under n=200. Pure-math core unit-tested in `verify_validation.py` (9/9). |
+| `verify_validation.py` | tests the tester — perm_pvalue / cscv_pbo / expected_max_sharpe on known-truth inputs (edge→low p/low PBO; random→p~0.5/PBO~0.5). |
 | `backtest_signals.py` | **contract-economics backtester**: replays directional (expansion) signals as simulated Deriv Rise/Fall contracts vs archived ticks, applies the payout haircut (default 95%), reports simulated P&L + ROI vs a null model. Break-even win rate = 1/(1+payout)=51.3%; on a CSPRNG you get ~50% → structurally negative (the house edge). Look-ahead firewall: enter only at first tick after `bar_close_epoch`. |
 
 Detector consumes `MarketSnapshot.views` (plain floats) only — pandas never leaks past the store.
@@ -133,9 +135,17 @@ Config params live in `config.py` (`signal_*`, `signal_params()`, `params_hash()
 a CSPRNG — the correct result). NOT yet live-tested (the running soak is pre-Phase-2 code; restart
 `main.py` to go live).
 
-**Gate before Phase 3 (locked):** >500 reviewed signals AND a null-model comparison showing a
-demonstrated, repeatable edge. Expected outcome = NO edge → stay in research; that's success, not
-failure. No proposal/buy/sell code until cleared.
+**Gate before Phase 3 (locked):** >500 reviewed signals AND `validate_signals.py` showing a
+demonstrated, repeatable edge — permutation p<0.05 AND OOS survival AND low PBO AND best Sharpe
+above the deflated/expected-max hurdle. Expected outcome = NO edge → stay in research; that's
+success, not failure. No proposal/buy/sell code until cleared.
+
+**Deep-research conclusion (2026-06-15, 25 primary-sourced claims, 0 refuted):** neither SMC nor the
+Forex Master Pattern has verified predictive edge; on a CSPRNG synthetic an edge is impossible by
+construction (Deriv's own docs: chart patterns are "purely coincidental"); fixed-payout = structural
+negative EV (house edge) → gambler's ruin regardless of sizing; the honest "fix" is rigorous TESTING
+(Bailey/López de Prado: overfitting is always present once >1 config is tried), not a better pattern.
+Hence `validate_signals.py`. The bot's real value is an honest research harness, not edge-finding.
 
 ## Dashboard = BUILT (read-only research viewer, NO trading)
 
