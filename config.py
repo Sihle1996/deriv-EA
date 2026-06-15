@@ -51,7 +51,8 @@ class Config:
 
     # --- Phase 2: signal research engine (detect + LOG only; NO trading) ----------
     # Detector runs on candle CLOSE, consumes MarketSnapshot.views only. See signals.py.
-    signal_version: str = "phase2_v1"  # human-readable rule tag; bump when logic/defaults change
+    signal_version: str = "phase2_v2"  # human-readable rule tag; bump when logic/defaults change
+                                       # v2 = added the TREND/REVERSAL third phase after expansion
     signal_timeframes: tuple[str, ...] = ("1m", "5m")
     atr_period: int = 14               # Wilder ATR period
     bb_window: int = 20                # Bollinger window for band-width volatility measure
@@ -62,6 +63,11 @@ class Config:
     contraction_range_bars: int = 20   # bars used to freeze the breakout range at contraction entry
     breakout_atr_mult: float = 1.0     # EXPANSION when close breaks range by N*atr_at_contraction
     max_contraction_bars: int = 60     # abandon a contraction (no signal) if no breakout within this
+    # Phase 3 of the pattern: after an expansion breakout, track whether the move CONTINUES (trend)
+    # or retraces back through the breakout level (reversal). On a CSPRNG there is no momentum, so
+    # this is expected to be ~50/50 (no edge) — it's logged to MEASURE that, not to trade it.
+    trend_continue_atr: float = 1.0    # TREND if price extends this*ATR beyond the expansion close
+    trend_max_bars: int = 20           # give up tracking the post-expansion move after this many bars
     signal_flush_every: int = 1        # write-through JSONL (tiny volume; survive ungraceful kills)
     # review_signals.py (offline outcome measurement)
     outcome_horizon_bars: int = 10     # forward window per signal, in bars of its timeframe
@@ -111,6 +117,8 @@ class Config:
             "contraction_range_bars": self.contraction_range_bars,
             "breakout_atr_mult": self.breakout_atr_mult,
             "max_contraction_bars": self.max_contraction_bars,
+            "trend_continue_atr": self.trend_continue_atr,
+            "trend_max_bars": self.trend_max_bars,
         }
 
     def params_hash(self) -> str:

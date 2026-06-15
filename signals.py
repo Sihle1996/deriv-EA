@@ -24,6 +24,8 @@ class Phase(str, Enum):
     NO_SIGNAL = "no_signal"
     CONTRACTION = "contraction"
     EXPANSION = "expansion"
+    TREND = "trend"          # after expansion, the move CONTINUED in the breakout direction
+    REVERSAL = "reversal"    # after expansion, price retraced back through the breakout level
 
 
 @dataclass(frozen=True)
@@ -36,8 +38,8 @@ class SignalRecord:
     detected_at_epoch: int
     symbol: str
     timeframe: str
-    phase: str                      # "contraction" | "expansion"
-    direction: str | None           # "up" | "down" | None
+    phase: str                      # "contraction" | "expansion" | "trend" | "reversal"
+    direction: str | None           # "up" | "down" | None (trend=continue dir; reversal=new dir)
     bar_epoch: int                  # trigger bar open-time (dedup key with timeframe+phase)
     bar_close_epoch: int            # bar_epoch + tf_seconds — look-ahead firewall
     price_at_signal: float          # trigger bar close (outcome baseline)
@@ -49,8 +51,8 @@ class SignalRecord:
     atr_at_contraction: float | None
     contraction_high: float | None
     contraction_low: float | None
-    contraction_bars: int | None    # bars elapsed in the contraction (0 for the contraction record)
-    episode_id: str                 # ties a contraction to its expansion
+    contraction_bars: int | None    # bars elapsed in the phase that led here (0 for contraction)
+    episode_id: str                 # ties contraction → expansion → trend/reversal of one episode
     params_hash: str
 
     def to_dict(self) -> dict:
@@ -79,6 +81,10 @@ class TimeframeDetector:
         self.c_entry_epoch: int | None = None
         self.episode_id: str | None = None
         self.bars_in_contraction = 0
+        # frozen at expansion entry (for the TREND phase):
+        self.exp_dir: str | None = None
+        self.exp_close: float | None = None
+        self.bars_in_trend = 0
 
     def on_closed_bar(self, view) -> SignalRecord | None:
         # Warm-up gate + only ever act on a genuinely NEW closed bar (reconnects can re-feed bars).
@@ -102,18 +108,32 @@ class TimeframeDetector:
                 return self._enter_contraction(view)
             return None
 
-        # Phase.CONTRACTION
-        self.bars_in_contraction += 1
-        n = self.p["breakout_atr_mult"]
-        up = view.close > self.c_high + n * self.c_atr
-        down = view.close < self.c_low - n * self.c_atr
-        if up or down:
-            rec = self._make(view, Phase.EXPANSION, "up" if up else "down", self.bars_in_contraction)
-            self._end_episode()
-            return rec
-        if self.bars_in_contraction >= self.p["max_contraction_bars"]:
-            self._end_episode()  # timed out — emit nothing
+        if self.phase is Phase.CONTRACTION:
+            self.bars_in_contraction += 1
+            n = self.p["breakout_atr_mult"]
+            up = view.close > self.c_high + n * self.c_atr
+            down = view.close < self.c_low - n * self.c_atr
+            if up or down:
+                return self._enter_expansion(view, "up" if up else "down")
+            if self.bars_in_contraction >= self.p["max_contraction_bars"]:
+                self._end_episode()  # timed out — emit nothing
             return None
+
+        # Phase.TREND — tracking the post-expansion move: continuation vs retrace through breakout.
+        self.bars_in_trend += 1
+        cont = self.p["trend_continue_atr"] * self.c_atr
+        if self.exp_dir == "up":
+            if view.close >= self.exp_close + cont:                       # extended further up
+                return self._close_episode(view, Phase.TREND, "up")
+            if view.close < self.c_high:                                  # fell back through breakout
+                return self._close_episode(view, Phase.REVERSAL, "down")
+        else:  # down breakout
+            if view.close <= self.exp_close - cont:                       # extended further down
+                return self._close_episode(view, Phase.TREND, "down")
+            if view.close > self.c_low:                                   # popped back through breakout
+                return self._close_episode(view, Phase.REVERSAL, "up")
+        if self.bars_in_trend >= self.p["trend_max_bars"]:
+            self._end_episode()  # inconclusive — emit nothing
         return None
 
     # -- transitions -----------------------------------------------------------------
@@ -127,11 +147,27 @@ class TimeframeDetector:
         self.episode_id = f"{self.symbol}:{self.tf}:{view.closed_bar_epoch}"
         return self._make(view, Phase.CONTRACTION, None, 0)
 
+    def _enter_expansion(self, view, direction: str) -> SignalRecord:
+        """Emit the expansion breakout, then enter TREND to track what happens next."""
+        rec = self._make(view, Phase.EXPANSION, direction, self.bars_in_contraction)
+        self.phase = Phase.TREND
+        self.exp_dir = direction
+        self.exp_close = view.close
+        self.bars_in_trend = 0
+        return rec  # episode_id + c_* stay frozen through the trend phase
+
+    def _close_episode(self, view, phase: Phase, direction: str) -> SignalRecord:
+        """Emit a trend/reversal record AND end the episode (back to NO_SIGNAL, disarmed)."""
+        rec = self._make(view, phase, direction, self.bars_in_trend)
+        self._end_episode()
+        return rec
+
     def _end_episode(self) -> None:
         self.phase = Phase.NO_SIGNAL
         self._armed = False  # require hysteresis re-arm
         self.c_high = self.c_low = self.c_atr = self.c_entry_epoch = self.episode_id = None
-        self.bars_in_contraction = 0
+        self.exp_dir = self.exp_close = None
+        self.bars_in_contraction = self.bars_in_trend = 0
 
     def _make(self, view, phase: Phase, direction: str | None, contraction_bars: int) -> SignalRecord:
         bar_close = view.closed_bar_epoch + self.tf_seconds

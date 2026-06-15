@@ -24,6 +24,7 @@ P = {
     "atr_period": 14, "bb_window": 20, "bb_std": 2.0, "vol_lookback": 100,
     "contraction_pct": 0.20, "contraction_exit_pct": 0.40,
     "contraction_range_bars": 20, "breakout_atr_mult": 1.0, "max_contraction_bars": 3,
+    "trend_continue_atr": 1.0, "trend_max_bars": 5,
 }
 
 
@@ -82,14 +83,31 @@ def t_timeout_no_expansion() -> bool:
     return all(o is None for o in outs) and d.phase is Phase.NO_SIGNAL
 
 
+def t_trend_continuation() -> bool:
+    d = det()
+    d.on_closed_bar(view(120, 100.0, bw_pct=0.10, rhigh=101.0, rlow=99.0, atr=1.0))  # contraction
+    d.on_closed_bar(view(180, 102.5, bw_pct=0.10))               # expansion up (exp_close=102.5) -> TREND
+    r = d.on_closed_bar(view(240, 104.0, bw_pct=0.10))           # >= 102.5 + 1*1 = 103.5 -> trend up
+    return r is not None and r.phase == "trend" and r.direction == "up"
+
+
+def t_reversal() -> bool:
+    d = det()
+    d.on_closed_bar(view(120, 100.0, bw_pct=0.10, rhigh=101.0, rlow=99.0, atr=1.0))  # contraction
+    d.on_closed_bar(view(180, 102.5, bw_pct=0.10))               # expansion up -> TREND
+    r = d.on_closed_bar(view(240, 100.5, bw_pct=0.10))           # < contraction_high 101 -> reversal down
+    return r is not None and r.phase == "reversal" and r.direction == "down"
+
+
 def t_hysteresis() -> bool:
     d = det()
-    d.on_closed_bar(view(120, 100.0, bw_pct=0.10, rhigh=101.0, rlow=99.0, atr=1.0))
-    d.on_closed_bar(view(180, 102.5, bw_pct=0.10))               # expansion -> episode ends, disarmed
+    d.on_closed_bar(view(120, 100.0, bw_pct=0.10, rhigh=101.0, rlow=99.0, atr=1.0))  # contraction
+    d.on_closed_bar(view(180, 102.5, bw_pct=0.10))               # expansion up -> TREND
+    d.on_closed_bar(view(240, 100.0, bw_pct=0.10))               # retrace -> reversal, episode ends (disarmed)
     # A still-low bar must NOT immediately re-fire a contraction (hysteresis).
-    r_low = d.on_closed_bar(view(240, 100.0, bw_pct=0.10))
-    d.on_closed_bar(view(300, 100.0, bw_pct=0.50))               # vol climbs above exit_pct -> re-arm
-    r_re = d.on_closed_bar(view(360, 100.0, bw_pct=0.10, rhigh=101.0, rlow=99.0))  # now contraction allowed
+    r_low = d.on_closed_bar(view(300, 100.0, bw_pct=0.10))
+    d.on_closed_bar(view(360, 100.0, bw_pct=0.50))               # vol climbs above exit_pct -> re-arm
+    r_re = d.on_closed_bar(view(420, 100.0, bw_pct=0.10, rhigh=101.0, rlow=99.0))  # now contraction allowed
     return r_low is None and r_re is not None and r_re.phase == "contraction"
 
 
@@ -158,6 +176,8 @@ CHECKS = [
     ("expansion_up", t_expansion_up),
     ("expansion_down", t_expansion_down),
     ("timeout_no_expansion", t_timeout_no_expansion),
+    ("trend_continuation", t_trend_continuation),
+    ("reversal", t_reversal),
     ("hysteresis", t_hysteresis),
     ("refeed_dedup", t_refeed_dedup),
     ("engine_dedup", t_engine_dedup),

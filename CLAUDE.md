@@ -117,7 +117,7 @@ Volatility contraction/expansion detector on 1m + 5m. Plan: `.claude/plans/index
 | File | Role (Phase 2) |
 |------|------|
 | `candles.py` | added `TFView` + `MarketSnapshot.views`; `closed_frame(tf)` (closed bars only); `_compute_view` (ATR/Bollinger band-width/percentile/z-score — ALL pandas stays here) |
-| `signals.py` | pure detector: `Phase`, `SignalRecord`, `TimeframeDetector` (NO_SIGNAL→CONTRACTION→EXPANSION state machine), `SignalEngine`. No pandas/IO. |
+| `signals.py` | pure detector: `Phase`, `SignalRecord`, `TimeframeDetector`, `SignalEngine`. State machine NO_SIGNAL→CONTRACTION→EXPANSION→**TREND** then trend(continue)/reversal(retrace through breakout). No pandas/IO. `signal_version="phase2_v2"` (v2 added the 3rd phase). |
 | `storage.py` | `SignalStore` → `data/signals/<symbol>/<UTC-date>.jsonl` (dedup on `(tf,bar_epoch,phase)`, write-through) |
 | `main.py` | builds snapshot ONCE on candle close → print + `_run_signals`; skips signals on history reload; flushes signal_store on exit |
 | `verify_signals.py` | offline detector regression — **11/11 PASS** (transitions, warm-up, timeout, hysteresis, dedup, closed/partial-bar) |

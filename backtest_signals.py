@@ -88,16 +88,25 @@ def run_backtest(symbol: str, tf: str | None = None, duration_bars: int | None =
     stake = CONFIG.bt_stake if stake is None else stake
     breakeven = 1.0 / (1.0 + payout)
 
-    signals = [s for s in rv._load_signals(symbol)
-               if s.get("phase") == "expansion" and s.get("direction") in ("up", "down")]
+    all_sigs = rv._load_signals(symbol)
     if tf:
-        signals = [s for s in signals if s.get("timeframe") == tf]
+        all_sigs = [s for s in all_sigs if s.get("timeframe") == tf]
+    # Phase 3 tally: after expansion, did the move continue (trend) or retrace (reversal)?
+    # On a CSPRNG this should be ~50/50 — no momentum, no edge.
+    from collections import Counter
+    pc = Counter(s.get("phase") for s in all_sigs)
+    trend_n, rev_n = pc.get("trend", 0), pc.get("reversal", 0)
+    trend_continuation = (trend_n / (trend_n + rev_n)) if (trend_n + rev_n) else None
+
+    signals = [s for s in all_sigs
+               if s.get("phase") == "expansion" and s.get("direction") in ("up", "down")]
     epochs, prices = rv._load_ticks(symbol)
     if epochs is None or not signals:
         return {"symbol": symbol, "error": f"no tradeable expansion signals or tick archive for {symbol}",
                 "real": None, "null": None, "breakeven": breakeven, "payout": payout,
                 "duration_bars": duration_bars, "n_signals": len(signals), "trades": 0,
-                "incomplete": 0, "per_trade": [],
+                "incomplete": 0, "per_trade": [], "phase_counts": dict(pc),
+                "trend_n": trend_n, "reversal_n": rev_n, "trend_continuation": trend_continuation,
                 "caveat": "Collect signals (main.py / backfill_signals.py) and ticks first."}
 
     rng = random.Random(seed)
@@ -130,6 +139,8 @@ def run_backtest(symbol: str, tf: str | None = None, duration_bars: int | None =
     return {"symbol": symbol, "n_signals": len(signals), "trades": len(real), "incomplete": incomplete,
             "breakeven": breakeven, "payout": payout, "stake": stake, "duration_bars": duration_bars,
             "real": ra, "null": na, "verdict": verdict, "per_trade": per_trade,
+            "phase_counts": dict(pc), "trend_n": trend_n, "reversal_n": rev_n,
+            "trend_continuation": trend_continuation,
             "caveat": "Payout is an ASSUMPTION (default 0.95). Even a fair 50% win rate loses to the "
                       "payout haircut - that is the house edge, and why no real-money trading is justified."}
 

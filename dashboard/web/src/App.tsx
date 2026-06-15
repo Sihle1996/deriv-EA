@@ -84,6 +84,12 @@ function BacktestPanel({ bt }: { bt: Backtest | null }) {
         </tbody>
       </table>
       <p>break-even win rate <b>{pct(bt.breakeven)}%</b> · <span className={loses ? "bad" : "ok"}>{bt.verdict}</span></p>
+      {(bt.trend_n || bt.reversal_n) ? (
+        <p>after expansion: <b>{bt.trend_n}</b> trended / <b>{bt.reversal_n}</b> reversed
+          {bt.trend_continuation != null && <> · continuation <b>{(bt.trend_continuation * 100).toFixed(0)}%</b></>}
+          <span className="small"> (no momentum on an RNG; ratio also reflects threshold shapes — read the P&amp;L, not this)</span>
+        </p>
+      ) : null}
       <p className="small">{bt.caveat}</p>
     </Panel>
   );

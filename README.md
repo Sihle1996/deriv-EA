@@ -65,12 +65,19 @@ confirm the exact Step Index code rather than trusting the `stpRNG` default.
 
 ### The signal logic (Phase 2)
 
-Per timeframe (1m, 5m), a state machine **NO_SIGNAL → CONTRACTION → EXPANSION**:
+Per timeframe (1m, 5m), a state machine **NO_SIGNAL → CONTRACTION → EXPANSION → TREND/REVERSAL**
+(the Forex Master Pattern's three phases, made mechanical):
 - **Contraction**: Bollinger band-width drops into the low tail of its recent distribution
-  (`bw_percentile <= contraction_pct`).
+  (`bw_percentile <= contraction_pct`) — the coil.
 - **Expansion**: a later close breaks the frozen contraction range by `breakout_atr_mult × ATR`.
+- **Trend / Reversal**: after the breakout, the move either CONTINUES (`trend` — extends
+  `trend_continue_atr × ATR` further) or RETRACES back through the breakout level (`reversal`).
 - Hysteresis + a contraction timeout prevent repeated firing; a warm-up gate suppresses signals
-  until enough closed bars exist. All params are env-overridable (`SIG_*`, see `config.py`).
+  until enough closed bars exist. All params live in `config.py`.
+
+> On a CSPRNG synthetic there is no momentum, so trend-vs-reversal is ~random — it's logged to
+> *measure* that, not to trade it. The decisive test is the contract backtest's P&L, not the
+> trend/reversal ratio (whose baseline isn't a clean 50% because the two thresholds differ).
 
 `review_signals.py` joins each logged signal against the archived ticks (look-ahead firewall:
 only ticks with `epoch > bar_close_epoch`), computes forward return / MFE / MAE / first-touch, and
