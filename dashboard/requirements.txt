@@ -1,0 +1,4 @@
+# Dashboard backend only (the bot itself doesn't need these).
+# Install into the same venv:  .venv\Scripts\python -m pip install -r dashboard\requirements.txt
+fastapi>=0.110
+uvicorn[standard]>=0.29

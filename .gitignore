@@ -1,0 +1,20 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Raw market data archive — can be large; never commit. Keep the folders, ignore contents.
+data/ticks/*
+!data/ticks/.gitkeep
+data/signals/*
+!data/signals/.gitkeep
+
+# Background-run logs + PID file (run_all.py)
+logs/
+
+# Node / React frontend
+node_modules/
+dashboard/web/node_modules/
+dashboard/web/dist/
+*.local
