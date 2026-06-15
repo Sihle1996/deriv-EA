@@ -73,7 +73,7 @@ function BacktestPanel({ bt }: { bt: Backtest | null }) {
   if (!bt) return <Panel title="Backtest — would it make money?"><p>loading…</p></Panel>;
   if (bt.error || !bt.real) return <Panel title="Backtest — would it make money?"><p className="small">{bt.error || "no tradeable signals yet"}</p></Panel>;
   const r = bt.real, n = bt.null;
-  const loses = (bt.verdict || "").startsWith("LOSES");
+  const vcls = { good: "ok", watch: "watch", weak: "weak", bad: "bad" }[bt.verdict_class || "bad"] || "bad";
   return (
     <Panel title="Backtest — would it make money?">
       <table>
@@ -83,7 +83,7 @@ function BacktestPanel({ bt }: { bt: Backtest | null }) {
           {n && <tr className="dim"><td>Random (null)</td><td>{pct(n.win_rate)}</td><td>{n.total_pnl.toFixed(2)}</td><td>{n.roi_pct.toFixed(1)}%</td></tr>}
         </tbody>
       </table>
-      <p>break-even win rate <b>{pct(bt.breakeven)}%</b> · <span className={loses ? "bad" : "ok"}>{bt.verdict}</span></p>
+      <p>break-even win rate <b>{pct(bt.breakeven)}%</b> · <span className={vcls}>{bt.verdict}</span></p>
       {(bt.trend_n || bt.reversal_n) ? (
         <p>after expansion: <b>{bt.trend_n}</b> trended / <b>{bt.reversal_n}</b> reversed
           {bt.trend_continuation != null && <> · continuation <b>{(bt.trend_continuation * 100).toFixed(0)}%</b></>}

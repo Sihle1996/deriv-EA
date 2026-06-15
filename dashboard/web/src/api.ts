@@ -10,7 +10,7 @@ export type Health = {
   coverage_pct: number | null; gaps: number | null; live: boolean;
 };
 export type Backtest = {
-  error?: string; verdict?: string; caveat?: string; breakeven?: number;
+  error?: string; verdict?: string; verdict_class?: string; caveat?: string; breakeven?: number;
   real?: { win_rate: number; total_pnl: number; roi_pct: number; n: number };
   null?: { win_rate: number; total_pnl: number; roi_pct: number; n: number } | null;
   trend_n?: number; reversal_n?: number; trend_continuation?: number | null;

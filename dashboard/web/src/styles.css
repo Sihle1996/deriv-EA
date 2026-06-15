@@ -25,6 +25,8 @@ header select {
 .badge.bad, .bad { color: #ef5350; }
 .badge.ok { background: #11302b; }
 .badge.bad { background: #34191a; }
+.watch { color: #e3b341; }
+.weak { color: #8b949e; }
 
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
 @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }

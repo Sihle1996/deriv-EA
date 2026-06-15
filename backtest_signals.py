@@ -30,6 +30,8 @@ import numpy as np
 from config import CONFIG
 import review_signals as rv  # reuse _load_signals, _load_ticks, TF_SECONDS, GAP_S
 
+MIN_TRADES_FOR_VERDICT = 200  # below this the win-rate is noise; verdict stays "insufficient data"
+
 
 def simulate_trade(epochs, prices, signal_close_epoch: int, direction: str,
                    duration_s: int, payout: float, stake: float) -> dict | None:
@@ -133,12 +135,24 @@ def run_backtest(symbol: str, tf: str | None = None, duration_bars: int | None =
 
     ra = aggregate(real, stake, "real")
     na = aggregate(null, stake, "null") if null else None
-    verdict = ("PROFITABLE on this sample - re-test on more data before trusting it"
-               if ra["win_rate"] > breakeven and ra["total_pnl"] > 0
-               else "LOSES MONEY - win rate below break-even (house edge; expected on a CSPRNG)")
+    # Honest verdict: null-aware AND power-aware. "win > break-even" alone is a fooled-by-randomness
+    # trap — it ignores whether random entries did just as well, and ignores sample size.
+    ntr, rw, rroi = ra["n"], ra["win_rate"], ra["roi_pct"]
+    if ntr < MIN_TRADES_FOR_VERDICT:
+        verdict = f"INSUFFICIENT DATA (n={ntr}, low power) - cannot tell edge from noise yet"
+        verdict_class = "weak"
+    elif na and (rw <= na["win_rate"] or rroi <= na["roi_pct"]):
+        verdict = "NO EDGE - random entries match or beat the signals"
+        verdict_class = "bad"
+    elif rw > breakeven and (na is None or (rw > na["win_rate"] and rroi > na["roi_pct"])):
+        verdict = "possible edge - confirm with validate_signals.py (permutation p, PBO)"
+        verdict_class = "watch"
+    else:
+        verdict = "NO EDGE - loses to the house edge (win rate below break-even)"
+        verdict_class = "bad"
     return {"symbol": symbol, "n_signals": len(signals), "trades": len(real), "incomplete": incomplete,
             "breakeven": breakeven, "payout": payout, "stake": stake, "duration_bars": duration_bars,
-            "real": ra, "null": na, "verdict": verdict, "per_trade": per_trade,
+            "real": ra, "null": na, "verdict": verdict, "verdict_class": verdict_class, "per_trade": per_trade,
             "phase_counts": dict(pc), "trend_n": trend_n, "reversal_n": rev_n,
             "trend_continuation": trend_continuation,
             "caveat": "Payout is an ASSUMPTION (default 0.95). Even a fair 50% win rate loses to the "
