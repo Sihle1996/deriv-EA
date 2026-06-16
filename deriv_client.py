@@ -25,6 +25,10 @@ log = logging.getLogger("deriv.client")
 Handler = Callable[[dict], None]
 OnConnect = Callable[["DerivClient"], Awaitable[None]]
 
+# Deriv error codes that are genuinely fatal (no point reconnecting). Everything else — notably
+# MarketIsClosed (real markets close on weekends/sessions), RateLimit, etc. — is transient and retried.
+FATAL_DERIV_CODES = {"InvalidToken", "AuthorizationRequired", "InvalidAppID", "InvalidAppMarkupPercentage"}
+
 
 class DerivError(Exception):
     """A Deriv API error reply ({'error': {'code', 'message'}})."""
@@ -83,8 +87,14 @@ class DerivClient:
                                 pass
             except (ConnectionClosed, OSError, asyncio.TimeoutError) as e:
                 log.warning("connection lost (%s)", e.__class__.__name__)
-            except DerivError:
-                raise  # auth/permission errors are fatal — don't spin reconnecting
+            except DerivError as e:
+                if e.code in FATAL_DERIV_CODES:
+                    raise  # auth/app errors are genuinely fatal — don't spin reconnecting
+                # Transient (e.g. MarketIsClosed — real markets close on weekends/sessions and reopen).
+                # Back off and retry instead of dying; wait longer when the market is simply closed.
+                log.warning("Deriv error %s — retrying (transient)", e.code)
+                if e.code == "MarketIsClosed":
+                    delay = max(delay, self.cfg.market_closed_delay)
             except Exception:
                 log.exception("unexpected supervisor error")
             finally:

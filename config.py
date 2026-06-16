@@ -114,6 +114,7 @@ class Config:
     # --- reconnection -------------------------------------------------------------
     reconnect_base_delay: float = 1.0  # seconds; exponential backoff start
     reconnect_max_delay: float = 30.0  # backoff ceiling
+    market_closed_delay: float = 60.0  # wait between retries while a real market is closed (transient)
     # WS keepalive. Worst-case dead-socket detection ≈ ping_interval + ping_timeout, which is
     # also the upper bound on the live-tick gap before reconnect kicks in. Lower = smaller gaps.
     ping_interval: float = 10.0
