@@ -161,6 +161,10 @@ def main() -> None:
     ap.add_argument("--family-size", type=int, default=5,
                     help="number of markets tested as a family (for Bonferroni-adjusted significance)")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--quick", action="store_true",
+                    help="skip the PBO/CSCV + deflated-Sharpe param sweep (parts 3-4). That sweep "
+                         "replays the whole tick archive per config (O(candles^2)) and is only "
+                         "meaningful with hundreds of trades; --quick runs permutation + walk-forward.")
     args = ap.parse_args()
 
     real, ep, px = _real_trades(args.symbol, args.duration_bars, args.payout, args.stake, args.tf)
@@ -219,6 +223,14 @@ def main() -> None:
     # 3) PBO via CSCV over the ATS param sweep  +  4) deflated (expected-max) Sharpe.
     # Sweeps the highest-leverage ATS param, ats_pivot_lookback, × the breakout buffer, replaying the
     # real HTF-gated engine per config.
+    if args.quick:
+        print("3-4) PBO/CSCV + deflated Sharpe: SKIPPED (--quick). The sweep replays the full archive "
+              "per config (O(candles^2) x configs x ladder TFs) and is only meaningful at a few hundred "
+              "trades — run the full validation as the sample approaches the 500-signal gate.")
+        print("=" * 90)
+        print("VERDICT (ATS, quick): permutation + walk-forward only. An edge still counts ONLY if it "
+              "clears the family-wise p-threshold AND survives OOS AND (full run) has low PBO AND real n.")
+        return
     from backfill_signals import build_candles
     candles = build_candles(ep, px)
     S = CONFIG.cscv_blocks
