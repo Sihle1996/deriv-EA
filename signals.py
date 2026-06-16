@@ -42,6 +42,10 @@ class SignalRecord:
     dist_from_value_line: float | None = None
     bars_since_expansion: int | None = None
     htf_dist_from_value_line: float | None = None
+    # Structural STOP reference for the ATS bracket = the Expansion-Phase swing extreme at entry
+    # (the spike low for a long / spike high for a short). The bracket backtester places the stop
+    # just beyond this. None on pre-bracket records (regenerate via backfill_signals to populate).
+    stop_ref: float | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

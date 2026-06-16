@@ -62,6 +62,13 @@ class Config:
     bt_payout_ratio: float = 0.95      # Rise/Fall WIN profit per unit stake. ASSUMPTION — real
                                        # payouts vary by symbol/duration (fetch via proposal API later).
     bt_stake: float = 1.0              # stake per simulated trade (unit stake)
+    # bracket_backtest.py (structural ATS bracket: SL=expansion extreme, TP1=value line, TP2=box far
+    # side; partial at TP1 then runner to TP2 with stop at break-even). P&L in R-multiples.
+    bt_partial_frac: float = 0.5       # fraction banked at TP1 (the rest runs to TP2 / break-even)
+    bt_stop_buffer_atr: float = 0.0    # stop placed this*ATR BEYOND the structural extreme (0 = at it)
+    bt_cost_atr: float = 0.0           # round-trip cost (spread+slippage) per fill, in ATR units. 0 is
+                                       # OPTIMISTIC — real markets have spread; raise to stress-test.
+    bt_bracket_max_bars: int = 60      # time-stop: close at market after this many entry-TF bars
     # validate_signals.py (honest statistical validation — treat any edge as a null to disprove)
     n_permutations: int = 2000         # Monte-Carlo null draws for the permutation test
     walk_forward_oos_frac: float = 0.30  # fraction of (time-ordered) trades held out as out-of-sample

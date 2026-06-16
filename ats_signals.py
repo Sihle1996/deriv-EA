@@ -72,6 +72,10 @@ class AtsTimeframeDetector:
         # frozen at breakout:
         self.exp_dir: str | None = None
         self.bars_since_exp = 0
+        # Expansion-phase swing extremes since the breakout (the structural STOP reference): a long's
+        # stop sits below exp_low, a short's above exp_high.
+        self.exp_high: float | None = None
+        self.exp_low: float | None = None
 
     @property
     def bias(self) -> str | None:
@@ -119,6 +123,8 @@ class AtsTimeframeDetector:
 
         # AtsPhase.EXPANSION (continuation mode) — wait for a pullback to value in the breakout dir.
         self.bars_since_exp += 1
+        self.exp_high = max(self.exp_high, view.high)   # extend the expansion swing extremes
+        self.exp_low = min(self.exp_low, view.low)
         tol = self.p["ats_pullback_tol_atr"] * self.c_atr
         pulled_back = (view.close <= self.value_line + tol) if self.exp_dir == "up" \
             else (view.close >= self.value_line - tol)
@@ -150,14 +156,19 @@ class AtsTimeframeDetector:
         self.phase = AtsPhase.EXPANSION
         self.exp_dir = direction
         self.bars_since_exp = 0
+        self.exp_high = view.high   # seed the expansion swing extremes with the breakout bar
+        self.exp_low = view.low
         return rec  # value_line + box + episode_id stay frozen through expansion
 
     def _emit_entry(self, view, direction: str, bars_since: int) -> SignalRecord:
         """Emit the (HTF-ungated) entry candidate in `direction`, then end the episode (one per
         episode). The engine applies the HTF-bias gate and stamps htf_bias/htf_dist."""
+        # Structural stop reference = the expansion swing extreme on the side the trade risks:
+        # a long (up) risks a deeper LOW; a short (down) risks a higher HIGH.
+        stop_ref = self.exp_low if direction == "up" else self.exp_high
         rec = self._make(view, P_ENTRY, direction, bars_since,
                          dist=abs(view.close - self.value_line),
-                         bars_since_expansion=bars_since)
+                         bars_since_expansion=bars_since, stop_ref=stop_ref)
         self._end_episode()
         return rec
 
@@ -166,10 +177,12 @@ class AtsTimeframeDetector:
         self.phase = AtsPhase.NO_SIGNAL
         self.box_high = self.box_low = self.c_atr = self.episode_id = None
         self.exp_dir = None
+        self.exp_high = self.exp_low = None
         self.bars_in_contraction = self.bars_since_exp = 0
 
     def _make(self, view, phase: str, direction: str | None, bars: int,
-              dist: float | None = None, bars_since_expansion: int | None = None) -> SignalRecord:
+              dist: float | None = None, bars_since_expansion: int | None = None,
+              stop_ref: float | None = None) -> SignalRecord:
         bar_close = view.closed_bar_epoch + self.tf_seconds
         return SignalRecord(
             schema_version=SCHEMA_VERSION,
@@ -194,6 +207,7 @@ class AtsTimeframeDetector:
             dist_from_value_line=dist,
             bars_since_expansion=bars_since_expansion,
             htf_dist_from_value_line=None,    # engine fills for entry records
+            stop_ref=stop_ref,                # structural stop reference (entry records only)
         )
 
 
