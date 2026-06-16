@@ -33,6 +33,24 @@ def recent_signals(symbol: str, limit: int = 100) -> list[dict]:
     return sigs[:limit]
 
 
+def archive_candles(symbol: str, granularity: int, count: int = 2000) -> list[dict]:
+    """OHLC candles resampled from the TICK ARCHIVE (historical), for the chart's 'archive' view —
+    so backfilled ATS value lines/entries (which live in the archived period) render in-window.
+    Cached briefly; the live feed serves the real-time chart instead."""
+    return _memo(("arch", symbol, granularity, count), 30.0,
+                 lambda: _archive_candles(symbol, granularity, count))
+
+
+def _archive_candles(symbol: str, granularity: int, count: int) -> list[dict]:
+    ep, px = rv._load_ticks(symbol)
+    if ep is None:
+        return []
+    s = pd.Series(px, index=pd.to_datetime(ep, unit="s", utc=True))
+    ohlc = s.resample(f"{int(granularity)}s").ohlc().dropna().iloc[-count:]
+    return [{"time": int(t.timestamp()), "open": float(r.open), "high": float(r.high),
+             "low": float(r.low), "close": float(r.close)} for t, r in ohlc.iterrows()]
+
+
 def ats_overlay(symbol: str, limit: int = 300) -> dict:
     """ATS Master Pattern overlay for the chart: the HTF (15m) value lines and the LTF (1m) pullback
     ENTRY markers, read from data/signals_ats/. Value lines are drawn as horizontal segments from

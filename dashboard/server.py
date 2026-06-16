@@ -79,6 +79,15 @@ async def api_candles(symbol: str, tf: str = "1m", count: int = 500):
     return await f.history_candles(g, count)
 
 
+@app.get("/api/archive_candles")
+def api_archive_candles(symbol: str, tf: str = "1m", count: int = 2000):
+    """Historical candles resampled from the tick archive (for the chart's 'archive' view)."""
+    g = GRANULARITY.get(tf)
+    if g is None:
+        return JSONResponse({"error": f"unsupported tf {tf}"}, status_code=400)
+    return readers.archive_candles(symbol, g, count)
+
+
 @app.get("/api/signals")
 def api_signals(symbol: str, limit: int = 100):
     return readers.recent_signals(symbol, limit)

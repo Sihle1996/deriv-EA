@@ -2,15 +2,17 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Chart from "./Chart";
 import {
   type AtsOverlay, type Backtest, type Candle, type Health, type SignalRec,
-  getAts, getBacktest, getCandles, getHealth, getSignals, getSymbols, useLiveFeed,
+  getArchiveCandles, getAts, getBacktest, getCandles, getHealth, getSignals, getSymbols, useLiveFeed,
 } from "./api";
 
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h"];
+type Mode = "live" | "archive";
 
 export default function App() {
   const [symbols, setSymbols] = useState<string[]>([]);
   const [symbol, setSymbol] = useState("");
   const [tf, setTf] = useState("1m");
+  const [mode, setMode] = useState<Mode>("live");
   const [candles, setCandles] = useState<Candle[]>([]);
   const [liveBar, setLiveBar] = useState<Candle | null>(null);
   const [price, setPrice] = useState<number | null>(null);
@@ -30,7 +32,9 @@ export default function App() {
     if (!symbol) return;
     let stop = false;
     setCandles([]); setLiveBar(null);
-    const loadCandles = () => getCandles(symbol, tf).then((c) => { if (!stop) setCandles(c); });
+    const loadCandles = () =>
+      (mode === "archive" ? getArchiveCandles(symbol, tf) : getCandles(symbol, tf))
+        .then((c) => { if (!stop) setCandles(c); });
     const poll = () => {
       loadCandles();                       // refetch candles so higher TFs stay current
       getSignals(symbol).then(setSignals);
@@ -41,7 +45,7 @@ export default function App() {
     poll();
     const id = setInterval(poll, 5000);
     return () => { stop = true; clearInterval(id); };
-  }, [symbol, tf]);
+  }, [symbol, tf, mode]);
 
   const onTick = useCallback((p: number) => setPrice(p), []);
   const onCandle = useCallback((bar: Candle) => setLiveBar({ ...bar }), []);
@@ -61,11 +65,16 @@ export default function App() {
         <select value={tf} onChange={(e) => setTf(e.target.value)} title="chart timeframe">
           {TIMEFRAMES.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
+        <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}
+          title="live feed vs candles resampled from the tick archive">
+          <option value="live">live</option>
+          <option value="archive">archive</option>
+        </select>
         <span className="price">{price !== null ? price.toFixed(5) : "—"}</span>
         {health && <span className={"badge " + (health.live ? "ok" : "bad")}>{health.live ? "LIVE" : "STALE"}</span>}
       </header>
 
-      <Chart candles={candles} signals={signals} liveBar={liveBar} tf={tf} ats={ats} />
+      <Chart candles={candles} signals={signals} liveBar={liveBar} tf={tf} ats={ats} mode={mode} />
 
       <div className="grid">
         <BacktestPanel bt={bt} />

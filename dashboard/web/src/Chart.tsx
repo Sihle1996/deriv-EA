@@ -7,8 +7,11 @@ import type { AtsOverlay, Candle, SignalRec } from "./api";
 type Tip = { x: number; y: number; sig: SignalRec } | null;
 
 export default function Chart({
-  candles, signals, liveBar, tf, ats,
-}: { candles: Candle[]; signals: SignalRec[]; liveBar: Candle | null; tf: string; ats: AtsOverlay | null }) {
+  candles, signals, liveBar, tf, ats, mode,
+}: {
+  candles: Candle[]; signals: SignalRec[]; liveBar: Candle | null;
+  tf: string; ats: AtsOverlay | null; mode: "live" | "archive";
+}) {
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const series = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -51,9 +54,10 @@ export default function Chart({
   }, [candles]);
 
   useEffect(() => {
-    // The WS feed only streams the forming 1m bar — only apply it on the 1m chart.
-    if (series.current && liveBar && tf === "1m") series.current.update(liveBar as any);
-  }, [liveBar, tf]);
+    // The WS feed only streams the forming 1m bar — apply it on the live 1m chart only (never in
+    // archive mode, where the chart is a static historical view).
+    if (series.current && liveBar && tf === "1m" && mode === "live") series.current.update(liveBar as any);
+  }, [liveBar, tf, mode]);
 
   // ATS value line for the displayed timeframe (held forward, stepped).
   useEffect(() => {

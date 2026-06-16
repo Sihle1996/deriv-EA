@@ -36,6 +36,8 @@ const j = (url: string) => fetch(url).then((r) => r.json());
 export const getSymbols = (): Promise<{ symbol: string; live: boolean }[]> => j("/api/symbols");
 export const getCandles = (s: string, tf = "1m", count = 500): Promise<Candle[]> =>
   j(`/api/candles?symbol=${s}&tf=${tf}&count=${count}`);
+export const getArchiveCandles = (s: string, tf = "1m", count = 2000): Promise<Candle[]> =>
+  j(`/api/archive_candles?symbol=${s}&tf=${tf}&count=${count}`);
 export const getSignals = (s: string, limit = 100): Promise<SignalRec[]> =>
   j(`/api/signals?symbol=${s}&limit=${limit}`);
 export const getBacktest = (s: string): Promise<Backtest> => j(`/api/backtest?symbol=${s}`);
