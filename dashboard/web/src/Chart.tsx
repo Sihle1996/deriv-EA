@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  createChart, LineType, type IChartApi, type ISeriesApi, type Time,
+  createChart, type IChartApi, type ISeriesApi, type Time,
 } from "lightweight-charts";
 import type { AtsOverlay, Candle, SignalRec } from "./api";
 
@@ -15,7 +15,7 @@ export default function Chart({
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const series = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const valueLine = useRef<ISeriesApi<"Line"> | null>(null);   // ATS value line (stepped)
+  const overlay = useRef<ISeriesApi<"Line">[]>([]);   // ATS boxes + forward value lines (one series each)
   const sigRef = useRef<SignalRec[]>([]);
   const [tip, setTip] = useState<Tip>(null);
 
@@ -33,11 +33,6 @@ export default function Chart({
       upColor: "#26a69a", downColor: "#ef5350", borderVisible: false,
       wickUpColor: "#26a69a", wickDownColor: "#ef5350",
     });
-    // ATS value line: a stepped line that holds each contraction's midpoint until the next.
-    valueLine.current = c.addLineSeries({
-      color: "#58a6ff", lineWidth: 2, lineType: LineType.WithSteps,
-      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-    });
     c.subscribeCrosshairMove((param) => {
       if (!param.time || !param.point) { setTip(null); return; }
       const t = param.time as number;
@@ -46,7 +41,7 @@ export default function Chart({
     });
     const ro = new ResizeObserver(() => c.applyOptions({ width: el.current!.clientWidth }));
     ro.observe(el.current);
-    return () => { ro.disconnect(); c.remove(); chart.current = null; series.current = null; valueLine.current = null; };
+    return () => { ro.disconnect(); c.remove(); chart.current = null; series.current = null; overlay.current = []; };
   }, []);
 
   useEffect(() => {
@@ -59,21 +54,31 @@ export default function Chart({
     if (series.current && liveBar && tf === "1m" && mode === "live") series.current.update(liveBar as any);
   }, [liveBar, tf, mode]);
 
-  // ATS value line for the displayed timeframe (held forward, stepped). Clipped to the visible
-  // candle window — otherwise out-of-window backfilled lines clamp onto the left edge.
+  // ATS overlay drawn the TradeATS way: each contraction = a faint BOX (top/bottom over its bars)
+  // with a solid VALUE LINE projected forward from it. One short line series per element (avoids the
+  // left-edge clamp of a single connected line). Only elements intersecting the window are drawn.
   useEffect(() => {
-    if (!valueLine.current) return;
-    const lo = candles.length ? (candles[0].time as number) : -Infinity;
-    const hi = candles.length ? (candles[candles.length - 1].time as number) : Infinity;
-    const all = (ats?.value_lines ?? [])
-      .filter((v) => v.tf === tf)
-      .map((v) => ({ time: v.epoch as number, value: v.value_line }))
-      .sort((a, b) => a.time - b.time);
-    const inWin = all.filter((p) => p.time >= lo && p.time <= hi);
-    const prior = all.filter((p) => p.time < lo).pop();   // value line active at the window start
-    const pts = prior && (!inWin.length || inWin[0].time !== lo)
-      ? [{ time: lo, value: prior.value }, ...inWin] : inWin;
-    valueLine.current.setData(pts.map((p) => ({ time: p.time as Time, value: p.value })) as any);
+    const c = chart.current;
+    if (!c) return;
+    for (const s of overlay.current) c.removeSeries(s);
+    overlay.current = [];
+    if (!candles.length) return;
+    const lo = candles[0].time as number, hi = candles[candles.length - 1].time as number;
+    const seg = (color: string, width: 1 | 2, t0: number, t1: number, v: number) => {
+      if (t1 < lo || t0 > hi || v == null) return;
+      const s = c.addLineSeries({
+        color, lineWidth: width, priceLineVisible: false, lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      s.setData([{ time: t0 as Time, value: v }, { time: t1 as Time, value: v }]);
+      overlay.current.push(s);
+    };
+    for (const v of ats?.value_lines ?? []) {
+      if (v.tf !== tf) continue;
+      seg("#58a6ff", 2, v.box_start, v.line_end, v.value_line);          // value line (point of origin)
+      if (v.box_high != null) seg("#2d4a6b", 1, v.box_start, v.box_end, v.box_high);  // box top
+      if (v.box_low != null) seg("#2d4a6b", 1, v.box_start, v.box_end, v.box_low);    // box bottom
+    }
   }, [ats, tf, candles]);
 
   // Markers: Phase-2 C/E/T/R (current tf) + ATS pullback entries (on the LTF, distinct purple).

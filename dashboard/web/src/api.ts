@@ -15,7 +15,11 @@ export type Backtest = {
   null?: { win_rate: number; total_pnl: number; roi_pct: number; n: number } | null;
   trend_n?: number; reversal_n?: number; trend_continuation?: number | null;
 };
-export type AtsValueLine = { epoch: number; value_line: number; tf: string };
+export type AtsValueLine = {
+  epoch: number; value_line: number; tf: string;
+  box_start: number; box_end: number; box_high: number | null; box_low: number | null;
+  line_end: number;
+};
 export type AtsEntry = {
   bar_epoch: number; direction: string | null; price: number | null; tf: string;
   value_line: number | null; htf_bias: string | null;
