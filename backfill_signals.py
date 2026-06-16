@@ -23,6 +23,7 @@ import sys
 
 import pandas as pd
 
+from ats_signals import AtsEngine
 from candles import MultiTimeframeStore
 from config import CONFIG
 from signals import SignalEngine
@@ -56,11 +57,32 @@ def replay(symbol: str, candles: list[dict]) -> list:
     return records
 
 
+def replay_ats(symbol: str, candles: list[dict]) -> list:
+    """Replay candles through the store + ATS engine exactly as main.py does. Same store-build as
+    the live spine (all_signal_timeframes + view_params so the 15m view is computed)."""
+    store = MultiTimeframeStore(symbol, CONFIG.timeframes, base_granularity=CONFIG.base_granularity,
+                                signal_timeframes=CONFIG.all_signal_timeframes,
+                                signal_params=CONFIG.view_params())
+    tf_seconds = {tf: int(pd.Timedelta(CONFIG.timeframes[tf]).total_seconds())
+                  for tf in CONFIG.all_signal_timeframes}
+    engine = AtsEngine(symbol, CONFIG.ats_signal_params(), CONFIG.ats_htf, CONFIG.ats_ltf,
+                       tf_seconds, CONFIG.ats_signal_version, CONFIG.ats_params_hash())
+    records, prev = [], None
+    for c in candles:
+        _, is_new = store.upsert(c)
+        if is_new and prev is not None:
+            records.extend(engine.on_snapshot(store.snapshot(c["close"], c["open_time"])))
+        prev = c
+    return records
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("symbol", nargs="?", default=None, help="symbol (positional)")
     ap.add_argument("--symbol", dest="symbol_flag", default=None,
                     help="symbol (flag form, for consistency with the other tools)")
+    ap.add_argument("--ats", action="store_true",
+                    help="regenerate the ATS Master Pattern stream (-> data/signals_ats/)")
     ap.add_argument("--dry-run", action="store_true", help="report only; write nothing (read-only)")
     args = ap.parse_args()
     symbol = args.symbol_flag or args.symbol or CONFIG.symbol
@@ -69,12 +91,14 @@ def main() -> None:
     if epochs is None:
         raise SystemExit(f"no tick archive under {CONFIG.tick_dir / symbol}")
     candles = build_candles(epochs, prices)
-    records = replay(symbol, candles)
+    records = replay_ats(symbol, candles) if args.ats else replay(symbol, candles)
+    out_dir = CONFIG.ats_signal_dir if args.ats else CONFIG.signal_dir
+    kind = "ATS" if args.ats else "Phase-2"
     print(f"symbol: {symbol}   ticks: {epochs.size:,}   candles: {len(candles)}   "
-          f"signals regenerated: {len(records)}")
+          f"{kind} signals regenerated: {len(records)}")
     print("(tip: run check_archive.py first - gaps in the tick archive become holes here too)")
 
-    store = SignalStore(CONFIG.signal_dir, symbol, CONFIG.signal_flush_every)
+    store = SignalStore(out_dir, symbol, CONFIG.signal_flush_every)
     if args.dry_run:
         # Count how many are NOT already on disk, without writing anything.
         new = 0
@@ -92,7 +116,7 @@ def main() -> None:
     added = sum(store.append(r) for r in records)
     store.close()
     print(f"wrote {added} new signals, skipped {len(records) - added} already logged "
-          f"-> data/signals/{symbol}/")
+          f"-> {out_dir.name}/{symbol}/")
 
 
 if __name__ == "__main__":

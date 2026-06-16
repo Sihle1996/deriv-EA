@@ -33,9 +33,10 @@ GAP_S = 5            # tick spacing above this inside a window => incomplete (do
 TF_SECONDS = {"1m": 60, "5m": 300, "15m": 900}
 
 
-def _load_signals(symbol: str) -> list[dict]:
+def _load_signals(symbol: str, signal_dir=None) -> list[dict]:
+    base = signal_dir if signal_dir is not None else CONFIG.signal_dir
     out = []
-    for f in sorted(glob.glob(str(CONFIG.signal_dir / symbol / "*.jsonl"))):
+    for f in sorted(glob.glob(str(base / symbol / "*.jsonl"))):
         with open(f, encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
@@ -122,12 +123,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbol", default=CONFIG.symbol)
     ap.add_argument("--tf", default=None, help="filter timeframe (e.g. 1m, 5m)")
-    ap.add_argument("--phase", default=None, help="filter phase (contraction|expansion)")
+    ap.add_argument("--phase", default=None, help="filter phase (contraction|expansion|entry)")
+    ap.add_argument("--ats", action="store_true",
+                    help="review the ATS Master Pattern stream (data/signals_ats/); entries use --phase entry")
     ap.add_argument("--horizon", type=int, default=CONFIG.outcome_horizon_bars)
     ap.add_argument("--seed", type=int, default=42, help="null-model RNG seed (reproducible)")
     args = ap.parse_args()
 
-    signals = _load_signals(args.symbol)
+    signals = _load_signals(args.symbol, signal_dir=CONFIG.ats_signal_dir if args.ats else None)
     if args.tf:
         signals = [s for s in signals if s.get("timeframe") == args.tf]
     if args.phase:

@@ -185,6 +185,47 @@ none of which are bugs:
 - Signals accrue slower (only during sessions) → real symbols reach the 500-gate later than synthetics.
 - (Not yet done: session-aware coverage in check_archive/health to label closures vs anomalies.)
 
+## ATS Master Pattern stream = BUILT (2026-06-16) — the user's manual method, made testable
+
+The user trades the **TradeATS "Master Pattern"** by hand and reports an edge on our current assets.
+Our Phase-2 detector enters on the **breakout**; ATS is a **value-line + HTF→LTF pullback** method —
+a different system, so the prior "no edge" never tested the user's actual claim. This is a SEPARATE,
+parallel research stream (NOT trading) so the honest harness can adjudicate the claim. Plan:
+`.claude/plans/indexed-honking-mango.md`.
+
+The method (faithful to the indicator sources): **contraction** = consecutive inside bars (lower-high
+AND higher-low) → freeze a **value line** at the box midpoint; **expansion** = close clears the box by
+`buffer*ATR`; **entry** = on the LTF, price PULLS BACK to its value line AND the move agrees with the
+**HTF bias** (HTF close vs its own value line). HTF gate is the heart of it.
+
+| File | Role (ATS) |
+|------|------|
+| `candles.py` | `TFView` gains `inside_run`/`box_high`/`box_low` + `ats_warm`; `_compute_view` computes ATR + inside-bar run + box at a LOWER gate (`atr_period+1`) so 15m warms in ~15 bars, independent of the Bollinger `vol_lookback` |
+| `ats_signals.py` | `AtsPhase`, `AtsTimeframeDetector` (per-TF state machine, PERSISTENT value line for bias), `AtsEngine` (HTF sets bias → gates LTF pullback entries). `signal_version="ats_v1"`. Reuses `SignalRecord` + new optional fields (`value_line`, `htf_bias`, `dist_from_value_line`, `bars_since_expansion`, `htf_dist_from_value_line`); `episode_id` ties contraction→breakout→entry |
+| `config.py` | `ats_*` params, `ats_signal_params()`/`ats_params_hash()`, `ats_signal_dir` (`data/signals_ats/`), `all_signal_timeframes` (= Phase-2 ∪ {15m,1m}), `view_params()`, `validate_ats_contraction_bars=(2,3,4,5)` |
+| `main.py` | builds the store over `all_signal_timeframes`; runs `AtsEngine` → its OWN `SignalStore(ats_signal_dir)` alongside Phase-2 (gated on `ats_enabled`) |
+| `verify_ats.py` | **13/13 PASS** — contraction/value-line/breakout/buffer/pullback-entry/HTF-gate(keeps aligned, blocks counter & no-bias)/timeout/dedup |
+| `backfill_signals.py --ats` | regenerate the ATS stream from the gap-free tick archive |
+| `backtest_signals.py --ats` / `validate_signals.py --ats` / `review_signals.py --ats` | score the ATS stream (tradeable phase = `entry`). validate sweeps `ats_contraction_bars` in the PBO and prints a **family-wise (Bonferroni) p-threshold** + per-market n/low-power caveat |
+| `dashboard/{readers,server}.py` + `web/src/{api,App,Chart}.tsx` | `/api/ats` → value lines (stepped blue line) + ATS entry arrows (purple) on the 15m/1m chart |
+
+**Separate dir/`signal_version` → zero collision** with Phase-2 (dedup key is `(tf,bar_epoch,phase)`).
+
+**Anti-overfit guardrail (locked):** the entry-quality metadata is for analysis only — any FILTER
+derived from it (e.g. "pullback within 3 bars") is a new config and MUST enter the PBO sweep, never a
+post-hoc cherry-pick.
+
+**Reality found on the current ~24h archives:** ATS is **selective + data-hungry**. On stpRNG (2994
+candles) it logged 16 records (7+7 contraction/breakout on 1m, 1+1 on 15m) but **0 entries**: the 1m
+detector made only ~4 raw entry candidates, and the 15m HTF contracted only once so its bias was
+undefined ~69% of the time → the gate (correctly) dropped them. This is faithful ATS, not a bug — it
+means the manual-edge claim **can't yet be confirmed or denied** on this data. The bots now collect ATS
+live (restart needed to pick up the new code); validate `--ats` correctly reports INSUFFICIENT DATA
+until entries accumulate toward the 500-gate. `ats_pullback_tol_atr=0.5` (enter near value, not only on
+exact touch) keeps it realistic without manufacturing signals. Honest expectation unchanged: synthetics
+= no edge by construction (control); real markets = measured honestly, only a finding if it clears
+family-wise p AND OOS AND low PBO AND real n.
+
 ## Later: Phase 3+ (NOT started)
 Trade execution + risk layer (stake cap, daily-loss stop, kill switch) behind the new-Options-API
 OTP auth for the `pat_` token (see "Auth reality"); FastAPI bridge; React dashboard

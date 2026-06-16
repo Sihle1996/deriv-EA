@@ -83,6 +83,22 @@ class Config:
     validate_contraction_pcts: tuple = (0.10, 0.15, 0.20, 0.25, 0.30)  # param sweep for PBO
     validate_breakout_mults: tuple = (0.5, 1.0, 1.5)                    # param sweep for PBO
 
+    # --- ATS Master Pattern detector (ats_signals.py; SEPARATE stream, NO trading) ----------------
+    # A faithful encoding of the TradeATS value-line + HTF→LTF pullback method, run alongside the
+    # Phase-2 breakout detector and written to its own data/signals_ats/ so the two never collide.
+    ats_enabled: bool = os.getenv("ATS_ENABLED", "true").lower() == "true"
+    ats_signal_version: str = "ats_v1"
+    ats_htf: str = os.getenv("ATS_HTF", "15m")   # higher timeframe — sets directional bias
+    ats_ltf: str = os.getenv("ATS_LTF", "1m")    # lower timeframe — gives the pullback entry
+    ats_contraction_bars: int = 2                # consecutive inside bars to confirm a contraction
+    ats_breakout_buffer_atr: float = 0.25        # EXPANSION when close clears the box by this*ATR
+    ats_pullback_tol_atr: float = 0.5            # ENTRY when LTF close returns within this*ATR of value
+                                                 # (traders enter AS price approaches the line, not only
+                                                 # on an exact touch; 0.0 = require a full touch/cross)
+    ats_max_contraction_bars: int = 60           # abandon a contraction with no breakout within this
+    ats_max_entry_bars: int = 20                 # abandon an expansion with no pullback within this
+    validate_ats_contraction_bars: tuple = (2, 3, 4, 5)  # PBO sweep — highest-leverage ATS param
+
     # --- storage ------------------------------------------------------------------
     data_dir: Path = ROOT / "data"
     tick_flush_every: int = 100        # flush the tick buffer to Parquet every N ticks
@@ -109,6 +125,38 @@ class Config:
     @property
     def signal_dir(self) -> Path:
         return self.data_dir / "signals"
+
+    @property
+    def ats_signal_dir(self) -> Path:
+        return self.data_dir / "signals_ats"
+
+    @property
+    def all_signal_timeframes(self) -> tuple[str, ...]:
+        """Union of Phase-2 + ATS timeframes — the store computes a TFView for each of these."""
+        return tuple(sorted(set(self.signal_timeframes) | {self.ats_htf, self.ats_ltf}))
+
+    def view_params(self) -> dict:
+        """Params the STORE needs to build TFViews for BOTH detectors (Phase-2 + ATS). Extra keys
+        are harmless to _compute_view; this carries ats_contraction_bars so the box window honors
+        config overrides."""
+        return {**self.signal_params(), "ats_contraction_bars": self.ats_contraction_bars}
+
+    def ats_signal_params(self) -> dict:
+        """Canonical ATS detector params — single source for AtsEngine and ats_params_hash."""
+        return {
+            "atr_period": self.atr_period,
+            "ats_contraction_bars": self.ats_contraction_bars,
+            "ats_breakout_buffer_atr": self.ats_breakout_buffer_atr,
+            "ats_pullback_tol_atr": self.ats_pullback_tol_atr,
+            "ats_max_contraction_bars": self.ats_max_contraction_bars,
+            "ats_max_entry_bars": self.ats_max_entry_bars,
+        }
+
+    def ats_params_hash(self) -> str:
+        import hashlib
+        import json
+        blob = json.dumps(self.ats_signal_params(), sort_keys=True).encode()
+        return hashlib.sha1(blob).hexdigest()[:12]
 
     def signal_params(self) -> dict:
         """Canonical detector params — the single source for both SignalEngine and params_hash.

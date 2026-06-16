@@ -50,10 +50,19 @@ class TFView:
     bbw_zscore: float | None = None        # (band_width - mean) / std over vol_lookback
     range_high: float | None = None        # high over the last contraction_range_bars closed bars
     range_low: float | None = None         # low  over the last contraction_range_bars closed bars
+    # ATS Master Pattern fields — computed at a LOWER warm-up gate (atr_period+1) than the Bollinger
+    # machinery above, so the geometric/inside-bar detector can act long before the percentile warms.
+    inside_run: int | None = None           # consecutive closed bars each with lower-high AND higher-low
+    box_high: float | None = None           # high over the last ats_contraction_bars closed bars
+    box_low: float | None = None            # low  over the last ats_contraction_bars closed bars
 
     @property
     def warm(self) -> bool:
         return self.band_width is not None and self.bw_percentile is not None
+
+    @property
+    def ats_warm(self) -> bool:
+        return self.atr is not None and self.inside_run is not None
 
 
 @dataclass(frozen=True)
@@ -199,17 +208,34 @@ def _compute_view(df: pd.DataFrame, tf: str, p: dict) -> TFView | None:
     bb_std = float(p.get("bb_std", 2.0))
     vol_lookback = int(p.get("vol_lookback", 100))
     range_bars = int(p.get("contraction_range_bars", 20))
-    # Need a full lookback window of *defined* band-width values (band width is NaN for the first
-    # bb_window-1 bars), plus enough bars for ATR.
+    ats_cbars = int(p.get("ats_contraction_bars", 2))
+
+    # --- Light-weight ATS layer: warms at atr_period+1 closed bars, well before the Bollinger gate.
+    # ATR (Wilder ~ EMA with alpha=1/period) + inside-bar compression run + the contraction box.
+    if n >= atr_period + 1:
+        prev_close = close.shift(1)
+        tr = pd.concat([(high - low), (high - prev_close).abs(), (low - prev_close).abs()],
+                       axis=1).max(axis=1)
+        atr = float(tr.ewm(alpha=1 / atr_period, adjust=False).mean().iloc[-1])
+        # inside_run = consecutive closed bars (ending now) each making a lower-high AND higher-low
+        # than the bar before it (ATS "contraction" = range squeezing from both sides).
+        hi_v, lo_v = high.values, low.values
+        run = 0
+        for i in range(len(hi_v) - 1, 0, -1):
+            if hi_v[i] < hi_v[i - 1] and lo_v[i] > lo_v[i - 1]:
+                run += 1
+            else:
+                break
+        # box = the outer range being contracted within: the reference bar + the required inside bars.
+        k = ats_cbars + 1
+        view.update(atr=atr, inside_run=int(run),
+                    box_high=float(high.iloc[-k:].max()), box_low=float(low.iloc[-k:].min()))
+
+    # --- Bollinger percentile layer (Phase-2): needs a full lookback window of *defined* band-width
+    # values (band width is NaN for the first bb_window-1 bars), plus enough bars for ATR.
     min_bars = max(atr_period + 1, bb_window + vol_lookback)
     if n < min_bars:
-        return TFView(**view)  # not warm yet — floats present, indicators None
-
-    # ATR (Wilder ~ EMA with alpha=1/period, adjust=False).
-    prev_close = close.shift(1)
-    tr = pd.concat([(high - low), (high - prev_close).abs(), (low - prev_close).abs()],
-                   axis=1).max(axis=1)
-    atr = float(tr.ewm(alpha=1 / atr_period, adjust=False).mean().iloc[-1])
+        return TFView(**view)  # not warm yet — ATS fields may be present, Bollinger fields None
 
     # Bollinger band width series, then its recent distribution.
     sma = close.rolling(bb_window).mean()
@@ -220,8 +246,7 @@ def _compute_view(df: pd.DataFrame, tf: str, p: dict) -> TFView | None:
     r_mean, r_std = float(recent.mean()), float(recent.std(ddof=0))
 
     view.update(
-        atr=atr,
-        band_width=bw_t,
+        band_width=bw_t,  # atr already set in the ATS layer above (min_bars >= atr_period+1)
         bw_threshold=float(recent.quantile(p.get("contraction_pct", 0.20))),
         bw_percentile=float((recent <= bw_t).mean()),
         bbw_zscore=((bw_t - r_mean) / r_std) if r_std > 0 else 0.0,

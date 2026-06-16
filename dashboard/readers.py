@@ -33,6 +33,24 @@ def recent_signals(symbol: str, limit: int = 100) -> list[dict]:
     return sigs[:limit]
 
 
+def ats_overlay(symbol: str, limit: int = 300) -> dict:
+    """ATS Master Pattern overlay for the chart: the HTF (15m) value lines and the LTF (1m) pullback
+    ENTRY markers, read from data/signals_ats/. Value lines are drawn as horizontal segments from
+    each contraction's bar to the next; entries as arrows. Display only — NO trading."""
+    sigs = rv._load_signals(symbol, signal_dir=CONFIG.ats_signal_dir)
+    sigs.sort(key=lambda s: s.get("bar_epoch", 0))
+    htf, ltf = CONFIG.ats_htf, CONFIG.ats_ltf
+    value_lines = [{"epoch": s["bar_epoch"], "value_line": s["value_line"], "tf": s["timeframe"]}
+                   for s in sigs if s.get("phase") == "contraction"
+                   and s.get("value_line") is not None and s.get("timeframe") in (htf, ltf)]
+    entries = [{"bar_epoch": s["bar_epoch"], "direction": s.get("direction"),
+                "price": s.get("price_at_signal"), "tf": s["timeframe"],
+                "value_line": s.get("value_line"), "htf_bias": s.get("htf_bias")}
+               for s in sigs if s.get("phase") == "entry"]
+    return {"symbol": symbol, "htf": htf, "ltf": ltf,
+            "value_lines": value_lines[-limit:], "entries": entries[-limit:]}
+
+
 def backtest_summary(symbol: str, payout: float | None = None, duration_bars: int | None = None) -> dict:
     key = ("bt", symbol, payout, duration_bars)
     return _memo(key, 10.0, lambda: bt.run_backtest(symbol, payout=payout, duration_bars=duration_bars))

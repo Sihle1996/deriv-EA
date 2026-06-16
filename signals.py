@@ -54,6 +54,15 @@ class SignalRecord:
     contraction_bars: int | None    # bars elapsed in the phase that led here (0 for contraction)
     episode_id: str                 # ties contraction → expansion → trend/reversal of one episode
     params_hash: str
+    # ATS Master Pattern fields (None for the Phase-2 detector). value_line = midpoint of the frozen
+    # contraction box; htf_bias = HTF side of its own value line at the LTF entry. The three *_metadata
+    # fields are for RESEARCH analysis only — any FILTER derived from them is a new config (must enter
+    # the PBO sweep, never a post-hoc cherry-pick).
+    value_line: float | None = None
+    htf_bias: str | None = None
+    dist_from_value_line: float | None = None      # |entry close - LTF value line| at entry
+    bars_since_expansion: int | None = None         # LTF bars from breakout to the entry pullback
+    htf_dist_from_value_line: float | None = None   # |HTF close - HTF value line| at entry
 
     def to_dict(self) -> dict:
         return asdict(self)

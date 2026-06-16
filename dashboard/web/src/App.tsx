@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Chart from "./Chart";
 import {
-  type Backtest, type Candle, type Health, type SignalRec,
-  getBacktest, getCandles, getHealth, getSignals, getSymbols, useLiveFeed,
+  type AtsOverlay, type Backtest, type Candle, type Health, type SignalRec,
+  getAts, getBacktest, getCandles, getHealth, getSignals, getSymbols, useLiveFeed,
 } from "./api";
 
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h"];
@@ -15,6 +15,7 @@ export default function App() {
   const [liveBar, setLiveBar] = useState<Candle | null>(null);
   const [price, setPrice] = useState<number | null>(null);
   const [signals, setSignals] = useState<SignalRec[]>([]);
+  const [ats, setAts] = useState<AtsOverlay | null>(null);
   const [bt, setBt] = useState<Backtest | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
 
@@ -33,6 +34,7 @@ export default function App() {
     const poll = () => {
       loadCandles();                       // refetch candles so higher TFs stay current
       getSignals(symbol).then(setSignals);
+      getAts(symbol).then((a) => { if (!stop) setAts(a); });
       getBacktest(symbol).then(setBt);
       getHealth(symbol).then(setHealth);
     };
@@ -63,7 +65,7 @@ export default function App() {
         {health && <span className={"badge " + (health.live ? "ok" : "bad")}>{health.live ? "LIVE" : "STALE"}</span>}
       </header>
 
-      <Chart candles={candles} signals={signals} liveBar={liveBar} tf={tf} />
+      <Chart candles={candles} signals={signals} liveBar={liveBar} tf={tf} ats={ats} />
 
       <div className="grid">
         <BacktestPanel bt={bt} />

@@ -82,15 +82,19 @@ def aggregate(trades: list[dict], stake: float, label: str) -> dict:
 
 
 def run_backtest(symbol: str, tf: str | None = None, duration_bars: int | None = None,
-                 payout: float | None = None, stake: float | None = None, seed: int = 42) -> dict:
+                 payout: float | None = None, stake: float | None = None, seed: int = 42,
+                 ats: bool = False) -> dict:
     """Reusable core. Returns a summary dict (also consumed by the dashboard). `real`/`null` are
-    aggregate dicts; `per_trade` is the per-signal detail (CLI writes it to CSV)."""
+    aggregate dicts; `per_trade` is the per-signal detail (CLI writes it to CSV). When `ats=True`,
+    reads the ATS stream (data/signals_ats/) and trades the pullback ENTRY phase, not the breakout."""
     duration_bars = duration_bars or CONFIG.outcome_horizon_bars
     payout = CONFIG.bt_payout_ratio if payout is None else payout
     stake = CONFIG.bt_stake if stake is None else stake
     breakeven = 1.0 / (1.0 + payout)
+    entry_phase = "entry" if ats else "expansion"
+    signal_dir = CONFIG.ats_signal_dir if ats else None
 
-    all_sigs = rv._load_signals(symbol)
+    all_sigs = rv._load_signals(symbol, signal_dir=signal_dir)
     if tf:
         all_sigs = [s for s in all_sigs if s.get("timeframe") == tf]
     # Phase 3 tally: after expansion, did the move continue (trend) or retrace (reversal)?
@@ -101,10 +105,10 @@ def run_backtest(symbol: str, tf: str | None = None, duration_bars: int | None =
     trend_continuation = (trend_n / (trend_n + rev_n)) if (trend_n + rev_n) else None
 
     signals = [s for s in all_sigs
-               if s.get("phase") == "expansion" and s.get("direction") in ("up", "down")]
+               if s.get("phase") == entry_phase and s.get("direction") in ("up", "down")]
     epochs, prices = rv._load_ticks(symbol)
     if epochs is None or not signals:
-        return {"symbol": symbol, "error": f"no tradeable expansion signals or tick archive for {symbol}",
+        return {"symbol": symbol, "error": f"no tradeable {entry_phase} signals or tick archive for {symbol}",
                 "real": None, "null": None, "breakeven": breakeven, "payout": payout,
                 "duration_bars": duration_bars, "n_signals": len(signals), "trades": 0,
                 "incomplete": 0, "per_trade": [], "phase_counts": dict(pc),
@@ -168,6 +172,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbol", default=CONFIG.symbol)
     ap.add_argument("--tf", default=None, help="filter timeframe (e.g. 1m, 5m)")
+    ap.add_argument("--ats", action="store_true",
+                    help="backtest the ATS Master Pattern stream (trades the pullback ENTRY phase)")
     ap.add_argument("--duration-bars", type=int, default=CONFIG.outcome_horizon_bars)
     ap.add_argument("--payout", type=float, default=CONFIG.bt_payout_ratio)
     ap.add_argument("--stake", type=float, default=CONFIG.bt_stake)
@@ -175,7 +181,7 @@ def main() -> None:
     args = ap.parse_args()
 
     r = run_backtest(args.symbol, tf=args.tf, duration_bars=args.duration_bars,
-                     payout=args.payout, stake=args.stake, seed=args.seed)
+                     payout=args.payout, stake=args.stake, seed=args.seed, ats=args.ats)
     if r.get("error"):
         raise SystemExit(r["error"])
 
@@ -194,7 +200,8 @@ def main() -> None:
 
     if r["per_trade"]:
         date = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-        out = CONFIG.signal_dir / args.symbol / f"_backtest_{date}.csv"
+        out_base = CONFIG.ats_signal_dir if args.ats else CONFIG.signal_dir
+        out = out_base / args.symbol / f"_backtest_{date}.csv"
         with open(out, "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=list(r["per_trade"][0].keys()))
             w.writeheader(); w.writerows(r["per_trade"])

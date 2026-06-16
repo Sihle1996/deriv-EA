@@ -15,6 +15,14 @@ export type Backtest = {
   null?: { win_rate: number; total_pnl: number; roi_pct: number; n: number } | null;
   trend_n?: number; reversal_n?: number; trend_continuation?: number | null;
 };
+export type AtsValueLine = { epoch: number; value_line: number; tf: string };
+export type AtsEntry = {
+  bar_epoch: number; direction: string | null; price: number | null; tf: string;
+  value_line: number | null; htf_bias: string | null;
+};
+export type AtsOverlay = {
+  symbol: string; htf: string; ltf: string; value_lines: AtsValueLine[]; entries: AtsEntry[];
+};
 
 const j = (url: string) => fetch(url).then((r) => r.json());
 
@@ -25,6 +33,7 @@ export const getSignals = (s: string, limit = 100): Promise<SignalRec[]> =>
   j(`/api/signals?symbol=${s}&limit=${limit}`);
 export const getBacktest = (s: string): Promise<Backtest> => j(`/api/backtest?symbol=${s}`);
 export const getHealth = (s: string): Promise<Health> => j(`/api/health?symbol=${s}`);
+export const getAts = (s: string): Promise<AtsOverlay> => j(`/api/ats?symbol=${s}`);
 
 /** Subscribe to the live WS feed for `symbol`; auto-reconnects on drop. */
 export function useLiveFeed(

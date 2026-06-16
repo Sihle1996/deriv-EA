@@ -98,10 +98,13 @@ def _dir_return(t: dict, direction: str) -> float:
     return (t["exit_price"] - t["entry_price"]) if direction == "up" else (t["entry_price"] - t["exit_price"])
 
 
-def _real_trades(symbol, duration_bars, payout, stake, tf=None):
-    """Outcomes of the ACTUALLY-LOGGED expansion signals (entry/exit via simulate_trade)."""
-    sigs = [s for s in rv._load_signals(symbol)
-            if s.get("phase") == "expansion" and s.get("direction") in ("up", "down")]
+def _real_trades(symbol, duration_bars, payout, stake, tf=None, ats=False):
+    """Outcomes of the ACTUALLY-LOGGED tradeable signals (entry/exit via simulate_trade). Phase-2
+    trades the breakout ('expansion'); ATS trades the value-line pullback ('entry')."""
+    entry_phase = "entry" if ats else "expansion"
+    signal_dir = CONFIG.ats_signal_dir if ats else None
+    sigs = [s for s in rv._load_signals(symbol, signal_dir=signal_dir)
+            if s.get("phase") == entry_phase and s.get("direction") in ("up", "down")]
     if tf:
         sigs = [s for s in sigs if s.get("timeframe") == tf]
     ep, px = rv._load_ticks(symbol)
@@ -165,6 +168,35 @@ def _fast_pnl_series(symbol, ep, px, df, cp, bm, duration_bars, payout, stake):
     return series
 
 
+def _ats_pnl_series(symbol, ep, px, candles, contraction_bars, buffer, duration_bars, payout, stake):
+    """Per-config replay for the ATS PBO sweep: rebuild the store + HTF-gated AtsEngine with a given
+    ats_contraction_bars × breakout buffer, replay the 1m candles, and backtest each pullback ENTRY.
+    Not vectorized (ATS entries are sparse and the engine is cheap), but it IS the real detector."""
+    from ats_signals import AtsEngine
+    from candles import MultiTimeframeStore
+    p = dict(CONFIG.ats_signal_params())
+    p["ats_contraction_bars"] = contraction_bars
+    p["ats_breakout_buffer_atr"] = buffer
+    vp = dict(CONFIG.view_params()); vp["ats_contraction_bars"] = contraction_bars
+    store = MultiTimeframeStore(symbol, CONFIG.timeframes, base_granularity=CONFIG.base_granularity,
+                                signal_timeframes=CONFIG.all_signal_timeframes, signal_params=vp)
+    tf_seconds = {tf: int(pd.Timedelta(CONFIG.timeframes[tf]).total_seconds())
+                  for tf in CONFIG.all_signal_timeframes}
+    engine = AtsEngine(symbol, p, CONFIG.ats_htf, CONFIG.ats_ltf, tf_seconds, "validate", "sweep")
+    dur = duration_bars * 60  # ATS entries are on the 1m LTF
+    series, prev = [], None
+    for c in candles:
+        _, is_new = store.upsert(c)
+        if is_new and prev is not None:
+            for rec in engine.on_snapshot(store.snapshot(c["close"], c["open_time"])):
+                if rec.phase == "entry" and rec.direction in ("up", "down"):
+                    t = bt.simulate_trade(ep, px, rec.bar_close_epoch, rec.direction, dur, payout, stake)
+                    if t:
+                        series.append((t["entry_epoch"], t["pnl"]))
+        prev = c
+    return series
+
+
 def _winrate(rows):
     d = [r for r in rows if r["win"] is not None]
     return (sum(1 for r in d if r["win"]) / len(d)) if d else float("nan")
@@ -179,20 +211,28 @@ def main() -> None:
     ap.add_argument("--payout", type=float, default=CONFIG.bt_payout_ratio)
     ap.add_argument("--stake", type=float, default=CONFIG.bt_stake)
     ap.add_argument("--n-perm", type=int, default=CONFIG.n_permutations)
+    ap.add_argument("--ats", action="store_true",
+                    help="validate the ATS Master Pattern stream (value-line pullback ENTRY)")
+    ap.add_argument("--family-size", type=int, default=5,
+                    help="number of markets tested as a family (for Bonferroni-adjusted significance)")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
-    real, ep, px = _real_trades(args.symbol, args.duration_bars, args.payout, args.stake, args.tf)
+    real, ep, px = _real_trades(args.symbol, args.duration_bars, args.payout, args.stake,
+                                args.tf, ats=args.ats)
     if ep is None:
         raise SystemExit(f"no tick archive for {args.symbol}")
     n = len(real)
-    print(f"symbol: {args.symbol}   expansion trades: {n}   duration: {args.duration_bars} bars   payout: {args.payout}")
+    label = "ATS pullback-entry" if args.ats else "expansion"
+    print(f"symbol: {args.symbol}   method: {label}   trades: {n}   "
+          f"duration: {args.duration_bars} bars   payout: {args.payout}")
     if n < 200:
         print(f"  !! LOW STATISTICAL POWER: n={n} trades. Permutation/CSCV/Sharpe tests need a few "
               f"hundred to be stable — treat every number below as INDICATIVE ONLY. The METHOD is what's "
               f"validated now; verdicts firm up as signals accumulate toward the 500-signal gate.")
     if n == 0:
-        raise SystemExit("no completed expansion trades to validate yet.")
+        raise SystemExit(f"no completed {label} trades to validate yet — accumulate more data "
+                         f"(ATS is selective; entries require an aligned HTF bias + a pullback to value).")
     print("=" * 90)
 
     # 1) Permutation test on mean directional price-return (payout-independent edge test)
@@ -217,6 +257,12 @@ def main() -> None:
     print(f"1) PERMUTATION TEST  mean dir-return obs={obs:+.5f}  null mean={statistics.fmean(null):+.5f}  "
           f"p-value={p:.3f}")
     print(f"   {'edge beyond random (p<0.05)' if p < 0.05 else 'NOT distinguishable from random entries'}")
+    # Family-wise honesty: testing several markets makes one spurious p<0.05 ~ a coin-flip. A lone
+    # uncorrected hit is NOISE; it only counts if it clears the Bonferroni-adjusted threshold.
+    if args.family_size > 1:
+        alpha_fw = 0.05 / args.family_size
+        print(f"   family-wise (Bonferroni, {args.family_size} markets): need p<{alpha_fw:.3f}  -> "
+              f"{'clears it' if p < alpha_fw else 'does NOT clear — treat as noise across the family'}")
 
     # 2) Walk-forward / out-of-sample
     rows = sorted(real, key=lambda r: r["epoch"])
@@ -226,18 +272,32 @@ def main() -> None:
           f"OOS n={len(OOS)} win={_winrate(OOS)*100:.1f}% pnl={sum(r['pnl'] for r in OOS):+.2f}")
     print(f"   {'OOS edge survived' if _winrate(OOS) > 0.5 and sum(r['pnl'] for r in OOS) > 0 else 'no OOS edge (in-sample result did not carry over)'}")
 
-    # 3) PBO via CSCV over a param sweep (1m, vectorized)  +  4) deflated (expected-max) Sharpe
-    df = _candle_df(ep, px)
-    grid = [(cp, bm) for cp in CONFIG.validate_contraction_pcts for bm in CONFIG.validate_breakout_mults]
+    # 3) PBO via CSCV over a param sweep  +  4) deflated (expected-max) Sharpe.
+    # Phase-2 sweeps contraction_pct × breakout_mult (vectorized 1m). ATS sweeps its highest-leverage
+    # param, ats_contraction_bars (2..5), × the breakout buffer, replaying the real HTF-gated engine.
     S = CONFIG.cscv_blocks
-    M = np.zeros((S, len(grid)))
     span = max(1, hi - lo)
     sharpes = []
-    for ci, (cp, bm) in enumerate(grid):
-        series = _fast_pnl_series(args.symbol, ep, px, df, cp, bm, args.duration_bars, args.payout, args.stake)
-        sharpes.append(sharpe([pnl for _, pnl in series]))
-        for e, pnl in series:
-            M[min(S - 1, int((e - lo) / span * S)), ci] += pnl
+    if args.ats:
+        from backfill_signals import build_candles
+        candles = build_candles(ep, px)
+        grid = [(cb, buf) for cb in CONFIG.validate_ats_contraction_bars for buf in (0.25, 0.5)]
+        M = np.zeros((S, len(grid)))
+        for ci, (cb, buf) in enumerate(grid):
+            series = _ats_pnl_series(args.symbol, ep, px, candles, cb, buf,
+                                     args.duration_bars, args.payout, args.stake)
+            sharpes.append(sharpe([pnl for _, pnl in series]))
+            for e, pnl in series:
+                M[min(S - 1, int((e - lo) / span * S)), ci] += pnl
+    else:
+        df = _candle_df(ep, px)
+        grid = [(cp, bm) for cp in CONFIG.validate_contraction_pcts for bm in CONFIG.validate_breakout_mults]
+        M = np.zeros((S, len(grid)))
+        for ci, (cp, bm) in enumerate(grid):
+            series = _fast_pnl_series(args.symbol, ep, px, df, cp, bm, args.duration_bars, args.payout, args.stake)
+            sharpes.append(sharpe([pnl for _, pnl in series]))
+            for e, pnl in series:
+                M[min(S - 1, int((e - lo) / span * S)), ci] += pnl
     nonempty_blocks = int((M.sum(axis=1) != 0).sum())
     print(f"3) PBO / CSCV  configs={len(grid)}  blocks={S} (non-empty {nonempty_blocks})")
     if nonempty_blocks < S:
@@ -252,8 +312,13 @@ def main() -> None:
         print(f"4) DEFLATED SHARPE  best config Sharpe={best:+.3f}  expected-max under null={hurdle:+.3f}  "
               f"({'clears the luck hurdle' if best > hurdle else 'within what ' + str(len(grid)) + ' trials produce by chance'})")
     print("=" * 90)
-    print("VERDICT: on a CSPRNG synthetic the honest expectation is p~0.5, no OOS survival, PBO~0.5 — "
-          "i.e. no edge. This harness is the gate any future market must pass before trading.")
+    if args.ats:
+        print("VERDICT (ATS): an edge counts ONLY if it clears the family-wise p-threshold AND survives "
+              "OOS AND has low PBO AND real n. On synthetics expect no edge (CSPRNG control). A lone real "
+              "market hit on small n is NOISE until it survives all four — that is the honest bar.")
+    else:
+        print("VERDICT: on a CSPRNG synthetic the honest expectation is p~0.5, no OOS survival, PBO~0.5 — "
+              "i.e. no edge. This harness is the gate any future market must pass before trading.")
 
 
 if __name__ == "__main__":

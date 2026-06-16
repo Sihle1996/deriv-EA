@@ -84,6 +84,12 @@ def api_signals(symbol: str, limit: int = 100):
     return readers.recent_signals(symbol, limit)
 
 
+@app.get("/api/ats")
+def api_ats(symbol: str):
+    """ATS Master Pattern overlay: HTF value lines + LTF pullback entries (display only)."""
+    return readers.ats_overlay(symbol)
+
+
 @app.get("/api/backtest")
 def api_backtest(symbol: str, payout: float | None = None, duration_bars: int | None = None):
     return readers.backtest_summary(symbol, payout, duration_bars)

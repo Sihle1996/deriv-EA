@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { createChart, type IChartApi, type ISeriesApi, type Time } from "lightweight-charts";
-import type { Candle, SignalRec } from "./api";
+import {
+  createChart, LineType, type IChartApi, type ISeriesApi, type Time,
+} from "lightweight-charts";
+import type { AtsOverlay, Candle, SignalRec } from "./api";
 
 type Tip = { x: number; y: number; sig: SignalRec } | null;
 
 export default function Chart({
-  candles, signals, liveBar, tf,
-}: { candles: Candle[]; signals: SignalRec[]; liveBar: Candle | null; tf: string }) {
+  candles, signals, liveBar, tf, ats,
+}: { candles: Candle[]; signals: SignalRec[]; liveBar: Candle | null; tf: string; ats: AtsOverlay | null }) {
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const series = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const valueLine = useRef<ISeriesApi<"Line"> | null>(null);   // ATS value line (stepped)
   const sigRef = useRef<SignalRec[]>([]);
   const [tip, setTip] = useState<Tip>(null);
 
@@ -27,16 +30,20 @@ export default function Chart({
       upColor: "#26a69a", downColor: "#ef5350", borderVisible: false,
       wickUpColor: "#26a69a", wickDownColor: "#ef5350",
     });
-    // Hover tooltip: when the crosshair is over a bar that has a signal, show its details.
+    // ATS value line: a stepped line that holds each contraction's midpoint until the next.
+    valueLine.current = c.addLineSeries({
+      color: "#58a6ff", lineWidth: 2, lineType: LineType.WithSteps,
+      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+    });
     c.subscribeCrosshairMove((param) => {
       if (!param.time || !param.point) { setTip(null); return; }
       const t = param.time as number;
-      const s = sigRef.current.find((x) => x.timeframe === "1m" && x.bar_epoch === t);
+      const s = sigRef.current.find((x) => x.timeframe === tf && x.bar_epoch === t);
       setTip(s ? { x: param.point.x, y: param.point.y, sig: s } : null);
     });
     const ro = new ResizeObserver(() => c.applyOptions({ width: el.current!.clientWidth }));
     ro.observe(el.current);
-    return () => { ro.disconnect(); c.remove(); chart.current = null; series.current = null; };
+    return () => { ro.disconnect(); c.remove(); chart.current = null; series.current = null; valueLine.current = null; };
   }, []);
 
   useEffect(() => {
@@ -44,16 +51,26 @@ export default function Chart({
   }, [candles]);
 
   useEffect(() => {
-    // The WS feed only streams the forming 1m bar — only apply it on the 1m chart; higher
-    // timeframes refresh via the periodic /api/candles poll instead.
+    // The WS feed only streams the forming 1m bar — only apply it on the 1m chart.
     if (series.current && liveBar && tf === "1m") series.current.update(liveBar as any);
   }, [liveBar, tf]);
 
+  // ATS value line for the displayed timeframe (held forward, stepped).
+  useEffect(() => {
+    if (!valueLine.current) return;
+    const pts = (ats?.value_lines ?? [])
+      .filter((v) => v.tf === tf)
+      .map((v) => ({ time: v.epoch as Time, value: v.value_line }))
+      .sort((a, b) => (a.time as number) - (b.time as number));
+    valueLine.current.setData(pts as any);
+  }, [ats, tf]);
+
+  // Markers: Phase-2 C/E/T/R (current tf) + ATS pullback entries (on the LTF, distinct purple).
   useEffect(() => {
     sigRef.current = signals;
     if (!series.current) return;
     const markers = signals
-      .filter((s) => s.timeframe === tf)   // signals exist on 1m/5m; higher TFs show none (context only)
+      .filter((s) => s.timeframe === tf)
       .map((s) => {
         const up = s.direction === "up";
         let position = "aboveBar", color = "#e3b341", shape = "circle", text = "C";
@@ -67,10 +84,21 @@ export default function Chart({
           position = "aboveBar"; color = "#a371f7"; shape = "square"; text = "R";
         }
         return { time: s.bar_epoch as Time, position: position as any, color, shape: shape as any, text };
-      })
-      .sort((a, b) => (a.time as number) - (b.time as number));
+      });
+    // ATS entries render on the LTF chart (that's where pullback entries are taken).
+    if (ats && tf === ats.ltf) {
+      for (const e of ats.entries) {
+        const up = e.direction === "up";
+        markers.push({
+          time: e.bar_epoch as Time,
+          position: (up ? "belowBar" : "aboveBar") as any,
+          color: "#d2a8ff", shape: (up ? "arrowUp" : "arrowDown") as any, text: "ATS",
+        });
+      }
+    }
+    markers.sort((a, b) => (a.time as number) - (b.time as number));
     series.current.setMarkers(markers as any);
-  }, [signals, tf]);
+  }, [signals, ats, tf]);
 
   const t = tip?.sig;
   return (
@@ -81,6 +109,7 @@ export default function Chart({
         <span><i className="arr up" />E — expansion (breakout)</span>
         <span><i className="sq grn" />T — trend (move continued)</span>
         <span><i className="sq rev" />R — reversal (retraced)</span>
+        <span><i className="vline" />ATS value line + entries</span>
       </div>
       {t && (
         <div className="tip" style={{ left: tip!.x + 14, top: tip!.y + 8 }}>
