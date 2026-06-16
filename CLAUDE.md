@@ -167,6 +167,24 @@ Run: `pip install -r dashboard\requirements.txt`; dev = uvicorn :8000 + `npm run
 The dashboard is an INDEPENDENT viewer — it adds its own public Deriv connection per symbol and does
 not touch the collector bots.
 
+## Real-market comparison (added 2026-06-16) — control vs treatment
+
+To test "where does the pattern actually thrive?", the SAME harness now also collects 3 REAL markets
+alongside the synthetics (all public on legacy WS v3, ~1.1 tick/s, tick-safe): `frxUSDJPY` (USD/JPY),
+`frxXAUUSD` (Gold/USD), `OTC_NDX` (US Tech 100 / NAS100). Synthetics = edge impossible by construction
+(control); real markets = edge POSSIBLE but historically unproven (treatment). All code is
+symbol-agnostic — no detector/storage changes; just added to `run_all.py` SYMBOLS (now 5 bots).
+
+**Market-hours reality (important):** real markets CLOSE (weekends, overnight sessions). Consequences,
+none of which are bugs:
+- During closures no ticks arrive → archive has legitimate weekend/overnight gaps; `check_archive`
+  coverage % and `health.gaps` will look "worse" for real symbols — that's market hours, not failure.
+- Dashboard shows a real symbol as **STALE** when its market is closed — correct, not a dead bot.
+- The validation harness is already robust: `simulate_trade`/`_outcome` REJECT any forward window
+  containing a >5s gap, so signals whose horizon spans a close are correctly excluded.
+- Signals accrue slower (only during sessions) → real symbols reach the 500-gate later than synthetics.
+- (Not yet done: session-aware coverage in check_archive/health to label closures vs anomalies.)
+
 ## Later: Phase 3+ (NOT started)
 Trade execution + risk layer (stake cap, daily-loss stop, kill switch) behind the new-Options-API
 OTP auth for the `pat_` token (see "Auth reality"); FastAPI bridge; React dashboard

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from candles import MultiTimeframeStore
 from deriv_client import DerivClient
@@ -27,6 +28,7 @@ class LiveFeed:
         self.last_tick: dict | None = None
         self.connected = False
         self._task: asyncio.Task | None = None
+        self._candle_cache: dict = {}  # (granularity, count) -> (monotonic_ts, data)
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
@@ -81,6 +83,25 @@ class LiveFeed:
         df = self.store.frame(tf).tail(count)
         return [{"time": int(ts.timestamp()), "open": float(r.open), "high": float(r.high),
                  "low": float(r.low), "close": float(r.close)} for ts, r in df.iterrows()]
+
+    async def history_candles(self, granularity: int, count: int = 500) -> list[dict]:
+        """Fetch NATIVE candle history from Deriv at any granularity (for the chart's timeframe
+        switcher — full history regardless of the in-process base). Cached ~10s so the frontend
+        poll doesn't hammer the API. Falls back to the last cache (or []) if the socket is mid-drop."""
+        key = (int(granularity), int(count))
+        hit = self._candle_cache.get(key)
+        if hit and time.monotonic() - hit[0] < 10:
+            return hit[1]
+        try:
+            res = await self.client.send({"ticks_history": self.symbol, "style": "candles",
+                                          "granularity": int(granularity), "count": int(count),
+                                          "end": "latest"})
+            data = [{"time": int(c["epoch"]), "open": float(c["open"]), "high": float(c["high"]),
+                     "low": float(c["low"]), "close": float(c["close"])} for c in res.get("candles", [])]
+            self._candle_cache[key] = (time.monotonic(), data)
+            return data
+        except Exception:
+            return hit[1] if hit else []
 
     async def stop(self) -> None:
         await self.client.close()

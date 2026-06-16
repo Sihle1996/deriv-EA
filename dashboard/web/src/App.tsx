@@ -5,9 +5,12 @@ import {
   getBacktest, getCandles, getHealth, getSignals, getSymbols, useLiveFeed,
 } from "./api";
 
+const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h"];
+
 export default function App() {
   const [symbols, setSymbols] = useState<string[]>([]);
   const [symbol, setSymbol] = useState("");
+  const [tf, setTf] = useState("1m");
   const [candles, setCandles] = useState<Candle[]>([]);
   const [liveBar, setLiveBar] = useState<Candle | null>(null);
   const [price, setPrice] = useState<number | null>(null);
@@ -24,17 +27,19 @@ export default function App() {
 
   useEffect(() => {
     if (!symbol) return;
-    setCandles([]); setLiveBar(null); setPrice(null);
-    getCandles(symbol).then(setCandles);
+    let stop = false;
+    setCandles([]); setLiveBar(null);
+    const loadCandles = () => getCandles(symbol, tf).then((c) => { if (!stop) setCandles(c); });
     const poll = () => {
+      loadCandles();                       // refetch candles so higher TFs stay current
       getSignals(symbol).then(setSignals);
       getBacktest(symbol).then(setBt);
       getHealth(symbol).then(setHealth);
     };
     poll();
     const id = setInterval(poll, 5000);
-    return () => clearInterval(id);
-  }, [symbol]);
+    return () => { stop = true; clearInterval(id); };
+  }, [symbol, tf]);
 
   const onTick = useCallback((p: number) => setPrice(p), []);
   const onCandle = useCallback((bar: Candle) => setLiveBar({ ...bar }), []);
@@ -51,11 +56,14 @@ export default function App() {
         <select value={symbol} onChange={(e) => setSymbol(e.target.value)}>
           {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+        <select value={tf} onChange={(e) => setTf(e.target.value)} title="chart timeframe">
+          {TIMEFRAMES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
         <span className="price">{price !== null ? price.toFixed(5) : "—"}</span>
         {health && <span className={"badge " + (health.live ? "ok" : "bad")}>{health.live ? "LIVE" : "STALE"}</span>}
       </header>
 
-      <Chart candles={candles} signals={signals} liveBar={liveBar} />
+      <Chart candles={candles} signals={signals} liveBar={liveBar} tf={tf} />
 
       <div className="grid">
         <BacktestPanel bt={bt} />

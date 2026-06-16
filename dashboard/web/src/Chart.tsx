@@ -5,8 +5,8 @@ import type { Candle, SignalRec } from "./api";
 type Tip = { x: number; y: number; sig: SignalRec } | null;
 
 export default function Chart({
-  candles, signals, liveBar,
-}: { candles: Candle[]; signals: SignalRec[]; liveBar: Candle | null }) {
+  candles, signals, liveBar, tf,
+}: { candles: Candle[]; signals: SignalRec[]; liveBar: Candle | null; tf: string }) {
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const series = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -44,14 +44,16 @@ export default function Chart({
   }, [candles]);
 
   useEffect(() => {
-    if (series.current && liveBar) series.current.update(liveBar as any);
-  }, [liveBar]);
+    // The WS feed only streams the forming 1m bar — only apply it on the 1m chart; higher
+    // timeframes refresh via the periodic /api/candles poll instead.
+    if (series.current && liveBar && tf === "1m") series.current.update(liveBar as any);
+  }, [liveBar, tf]);
 
   useEffect(() => {
     sigRef.current = signals;
     if (!series.current) return;
     const markers = signals
-      .filter((s) => s.timeframe === "1m")
+      .filter((s) => s.timeframe === tf)   // signals exist on 1m/5m; higher TFs show none (context only)
       .map((s) => {
         const up = s.direction === "up";
         let position = "aboveBar", color = "#e3b341", shape = "circle", text = "C";
@@ -68,7 +70,7 @@ export default function Chart({
       })
       .sort((a, b) => (a.time as number) - (b.time as number));
     series.current.setMarkers(markers as any);
-  }, [signals]);
+  }, [signals, tf]);
 
   const t = tip?.sig;
   return (

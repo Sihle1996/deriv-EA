@@ -59,12 +59,24 @@ def api_symbols():
     return [{"symbol": s, "live": f.connected} for s, f in feeds.items()]
 
 
+# Chart timeframe ladder -> Deriv candle granularity (seconds). Display-only; detection is 1m/5m.
+GRANULARITY = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400}
+
+
+@app.get("/api/timeframes")
+def api_timeframes():
+    return list(GRANULARITY.keys())
+
+
 @app.get("/api/candles")
-def api_candles(symbol: str, tf: str = "1m", count: int = 500):
+async def api_candles(symbol: str, tf: str = "1m", count: int = 500):
     f = feeds.get(symbol)
     if not f:
         return JSONResponse({"error": "unknown symbol"}, status_code=404)
-    return f.candles(tf, count)
+    g = GRANULARITY.get(tf)
+    if g is None:
+        return JSONResponse({"error": f"unsupported tf {tf}"}, status_code=400)
+    return await f.history_candles(g, count)
 
 
 @app.get("/api/signals")

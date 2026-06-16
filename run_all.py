@@ -14,7 +14,12 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SYMBOLS = ["stpRNG", "1HZ50V"]            # Step Index 100 + Volatility 50 (1s)
+SYMBOLS = [
+    "stpRNG", "1HZ50V",                   # synthetics (CSPRNG, 24/7) — edge impossible by construction
+    "frxUSDJPY", "frxXAUUSD", "OTC_NDX",  # REAL markets (USD/JPY, Gold/USD, US Tech 100) — edge POSSIBLE
+]                                         # real markets have closing hours: weekend/overnight gaps are
+                                          # EXPECTED, not failures (see CLAUDE.md). The control vs treatment
+                                          # for "does the pattern thrive where order flow exists?"
 LOGDIR = ROOT / "logs"
 PIDFILE = LOGDIR / "pids.txt"
 PY = ROOT / ".venv" / "Scripts" / "pythonw.exe"   # windowless: no console window pops up
