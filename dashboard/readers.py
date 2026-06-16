@@ -58,7 +58,9 @@ def ats_overlay(symbol: str, limit: int = 300) -> dict:
     sigs = rv._load_signals(symbol, signal_dir=CONFIG.ats_signal_dir)
     sigs.sort(key=lambda s: s.get("bar_epoch", 0))
     htf, ltf = CONFIG.ats_htf, CONFIG.ats_ltf
-    value_lines = _build_value_lines(sigs, htf, ltf)
+    # Value lines for the WHOLE ladder (1m..1h), so the chart can stack higher-TF equilibria onto
+    # the lower-TF view (the ATS "global view"). The chart styles them per timeframe.
+    value_lines = _build_value_lines(sigs, set(CONFIG.ats_ladder))
     entries = [{"bar_epoch": s["bar_epoch"], "direction": s.get("direction"),
                 "price": s.get("price_at_signal"), "tf": s["timeframe"],
                 "value_line": s.get("value_line"), "htf_bias": s.get("htf_bias")}
@@ -71,14 +73,15 @@ def ats_overlay(symbol: str, limit: int = 300) -> dict:
 _TF_SECS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
 
 
-def _build_value_lines(sigs: list[dict], htf: str, ltf: str) -> list[dict]:
+def _build_value_lines(sigs: list[dict], tfs) -> list[dict]:
     """One entry per contraction: the box (start/end × high/low) AND the value line projected
     FORWARD from the box — drawn the way TradeATS draws it (a box + a 'point of origin' line that
     extends right), not a single line connecting contractions. Projection runs to the next same-tf
-    contraction, capped, so lines don't overlap or run forever."""
+    contraction, capped, so lines don't overlap or run forever. `tfs` = timeframes to include."""
     length = CONFIG.ats_pivot_lookback
+    tfs = set(tfs)
     cons = [s for s in sigs if s.get("phase") == "contraction" and s.get("value_line") is not None
-            and s.get("timeframe") in (htf, ltf)]
+            and s.get("timeframe") in tfs]
     by_tf: dict[str, list] = {}
     for s in cons:
         by_tf.setdefault(s["timeframe"], []).append(s)
@@ -142,7 +145,7 @@ def deep_value_lines(tf: str, candles: list[dict]) -> list[dict]:
                 cons.append({"timeframe": tf, "bar_epoch": rec.bar_epoch, "value_line": rec.value_line,
                              "contraction_high": rec.contraction_high,
                              "contraction_low": rec.contraction_low, "phase": "contraction"})
-    return _build_value_lines(cons, tf, tf)  # htf==ltf==tf -> keeps this tf's boxes/lines
+    return _build_value_lines(cons, {tf})  # single-tf deep view
 
 
 def deep_overlay(symbol: str, tf: str, candles: list[dict]) -> dict:
