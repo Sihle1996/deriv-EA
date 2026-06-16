@@ -59,22 +59,33 @@ export default function Chart({
     if (series.current && liveBar && tf === "1m" && mode === "live") series.current.update(liveBar as any);
   }, [liveBar, tf, mode]);
 
-  // ATS value line for the displayed timeframe (held forward, stepped).
+  // ATS value line for the displayed timeframe (held forward, stepped). Clipped to the visible
+  // candle window — otherwise out-of-window backfilled lines clamp onto the left edge.
   useEffect(() => {
     if (!valueLine.current) return;
-    const pts = (ats?.value_lines ?? [])
+    const lo = candles.length ? (candles[0].time as number) : -Infinity;
+    const hi = candles.length ? (candles[candles.length - 1].time as number) : Infinity;
+    const all = (ats?.value_lines ?? [])
       .filter((v) => v.tf === tf)
-      .map((v) => ({ time: v.epoch as Time, value: v.value_line }))
-      .sort((a, b) => (a.time as number) - (b.time as number));
-    valueLine.current.setData(pts as any);
-  }, [ats, tf]);
+      .map((v) => ({ time: v.epoch as number, value: v.value_line }))
+      .sort((a, b) => a.time - b.time);
+    const inWin = all.filter((p) => p.time >= lo && p.time <= hi);
+    const prior = all.filter((p) => p.time < lo).pop();   // value line active at the window start
+    const pts = prior && (!inWin.length || inWin[0].time !== lo)
+      ? [{ time: lo, value: prior.value }, ...inWin] : inWin;
+    valueLine.current.setData(pts.map((p) => ({ time: p.time as Time, value: p.value })) as any);
+  }, [ats, tf, candles]);
 
   // Markers: Phase-2 C/E/T/R (current tf) + ATS pullback entries (on the LTF, distinct purple).
+  // Clipped to the visible candle window (same reason as the value line).
   useEffect(() => {
     sigRef.current = signals;
     if (!series.current) return;
+    const lo = candles.length ? (candles[0].time as number) : -Infinity;
+    const hi = candles.length ? (candles[candles.length - 1].time as number) : Infinity;
+    const inRange = (t: number) => t >= lo && t <= hi;
     const markers = signals
-      .filter((s) => s.timeframe === tf)
+      .filter((s) => s.timeframe === tf && inRange(s.bar_epoch))
       .map((s) => {
         const up = s.direction === "up";
         let position = "aboveBar", color = "#e3b341", shape = "circle", text = "C";
@@ -92,6 +103,7 @@ export default function Chart({
     // ATS entries render on the LTF chart (that's where pullback entries are taken).
     if (ats && tf === ats.ltf) {
       for (const e of ats.entries) {
+        if (!inRange(e.bar_epoch)) continue;
         const up = e.direction === "up";
         markers.push({
           time: e.bar_epoch as Time,
@@ -102,7 +114,7 @@ export default function Chart({
     }
     markers.sort((a, b) => (a.time as number) - (b.time as number));
     series.current.setMarkers(markers as any);
-  }, [signals, ats, tf]);
+  }, [signals, ats, tf, candles]);
 
   const t = tip?.sig;
   return (
