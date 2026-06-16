@@ -19,20 +19,27 @@ from candles import TFView, _compute_view
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("verify_ats")
 
+# Base params pin the modes these legacy tests were written for (midpoint value line + continuation
+# entry), so they stay valid regardless of the config DEFAULTS (now contraction_mean + value_fade).
+# The new defaults get their own dedicated tests below.
 P = {
     "atr_period": 14, "ats_pivot_lookback": 5, "ats_breakout_buffer_atr": 0.0,
     "ats_pullback_tol_atr": 0.5, "ats_max_contraction_bars": 3, "ats_max_entry_bars": 3,
+    "ats_entry_mode": "continuation", "ats_value_line_mode": "midpoint",
 }
 
 
-def view(epoch, close, *, contraction=False, box_high=101.0, box_low=99.0, atr=1.0, warm=True):
-    """A warm (or non-warm) ATS TFView. The detector reads close, contraction_now, box_high/low, atr."""
+def view(epoch, close, *, contraction=False, box_high=101.0, box_low=99.0, atr=1.0, warm=True,
+         box_close_mean=None):
+    """A warm (or non-warm) ATS TFView. The detector reads close, contraction_now, box_high/low,
+    box_close_mean, atr."""
     return TFView(
         tf="1m", closed_bar_epoch=epoch, close=close, high=close + 1, low=close - 1, n_bars=200,
         atr=atr if warm else None,
         contraction_now=contraction,
         box_high=box_high if contraction else None,
         box_low=box_low if contraction else None,
+        box_close_mean=box_close_mean if contraction else None,
     )
 
 
@@ -114,6 +121,37 @@ def t_refeed_dedup() -> bool:
     return len(r1) == 1 and r2 == []
 
 
+# -- value-line mode (contraction_mean, new default) ---------------------------------
+def t_value_line_contraction_mean() -> bool:
+    # contraction_mean uses the mean of contraction closes, NOT the box midpoint (102 here).
+    p = {**P, "ats_value_line_mode": "contraction_mean"}
+    d = AtsTimeframeDetector("TEST", "1m", 60, p, "ats_test", "hash")
+    out = d.on_closed_bar(view(120, 100.0, contraction=True, box_high=104.0, box_low=100.0,
+                               box_close_mean=101.3))
+    return len(out) == 1 and abs(out[0].value_line - 101.3) < 1e-9
+
+
+def t_value_line_mean_fallback_midpoint() -> bool:
+    # contraction_mean mode but mean unavailable -> safe fallback to midpoint (102).
+    p = {**P, "ats_value_line_mode": "contraction_mean"}
+    d = AtsTimeframeDetector("TEST", "1m", 60, p, "ats_test", "hash")
+    out = d.on_closed_bar(view(120, 100.0, contraction=True, box_high=104.0, box_low=100.0))
+    return len(out) == 1 and out[0].value_line == 102.0
+
+
+# -- entry mode (value_fade, new default) --------------------------------------------
+def t_value_fade_enters_against_break() -> bool:
+    # value_fade fires immediately on breakout, in the OPPOSITE direction (fade the spike), and
+    # ends the episode (no EXPANSION wait). Up-break -> a "down" entry candidate.
+    p = {**P, "ats_entry_mode": "value_fade"}
+    d = AtsTimeframeDetector("TEST", "1m", 60, p, "ats_test", "hash")
+    d.on_closed_bar(view(120, 100.0, contraction=True, box_high=101.0, box_low=99.0))
+    out = d.on_closed_bar(view(180, 101.01, contraction=False))   # plain up-break
+    phases = {(r.phase, r.direction) for r in out}
+    return (("breakout", "up") in phases and ("entry", "down") in phases
+            and d.phase is AtsPhase.NO_SIGNAL)
+
+
 # -- engine: HTF-bias gate -----------------------------------------------------------
 def _set_htf_bias_up(eng: AtsEngine) -> None:
     # HTF contraction sets value_line=99 (midpoint 98..100); bar close 99.5 > 99 -> bias "up".
@@ -173,6 +211,18 @@ def t_pivot_contraction_detected() -> bool:
     return v is not None and v.contraction_now and v.box_high == 108.0 and v.box_low == 92.0
 
 
+def t_pivot_box_close_mean() -> bool:
+    # Same compression as t_pivot_contraction_detected, but closes vary over the box window
+    # [min(ph,pl)=6 .. end]: closes[6:9] = 100,102,104 -> mean 102. (closes don't affect pivots.)
+    p = {"atr_period": 3, "ats_pivot_lookback": 2}
+    highs = [100, 101, 110, 101, 100, 101, 108, 101, 100]
+    lows  = [99,  98,  90,  98,  99,  98,  92,  98,  99]
+    closes = [100, 100, 100, 100, 100, 100, 100, 102, 104]
+    v = _compute_view(_frame(highs, lows, closes), "1m", p)
+    return (v is not None and v.contraction_now and v.box_close_mean is not None
+            and abs(v.box_close_mean - 102.0) < 1e-9)
+
+
 def t_pivot_no_contraction_when_expanding() -> bool:
     # Pivot-highs step UP (expansion, not compression) -> no contraction.
     p = {"atr_period": 3, "ats_pivot_lookback": 2}
@@ -193,10 +243,14 @@ CHECKS = [
     ("entry_pullback_up", t_entry_pullback_up),
     ("entry_timeout", t_entry_timeout),
     ("refeed_dedup", t_refeed_dedup),
+    ("value_line_contraction_mean", t_value_line_contraction_mean),
+    ("value_line_mean_fallback_midpoint", t_value_line_mean_fallback_midpoint),
+    ("value_fade_enters_against_break", t_value_fade_enters_against_break),
     ("gate_keeps_aligned", t_gate_keeps_aligned),
     ("gate_blocks_counter", t_gate_blocks_counter),
     ("gate_blocks_no_bias", t_gate_blocks_no_bias),
     ("pivot_contraction_detected", t_pivot_contraction_detected),
+    ("pivot_box_close_mean", t_pivot_box_close_mean),
     ("pivot_no_contraction_when_expanding", t_pivot_no_contraction_when_expanding),
 ]
 

@@ -1,12 +1,13 @@
-"""ATS Master Pattern detector — value-line + HTF→LTF pullback entry (signal_version="ats_v1").
+"""ATS Master Pattern detector — value-line + HTF→LTF entry (signal_version from config, ats_v3).
 
 A FAITHFUL, pure, side-effect-free encoding of the TradeATS / Forex-Master-Pattern method, distinct
 from the Phase-2 breakout detector in signals.py. NO trading. NO I/O. NO pandas. Consumes only
 `TFView` floats from MarketSnapshot (candles.py) and emits SignalRecords to a SEPARATE store.
 
 The method, per the research:
-  1. CONTRACTION  — consecutive inside bars (lower-high AND higher-low). A *value line* is frozen at
-                    the midpoint of the contraction box and projected forward.
+  1. CONTRACTION  — a swing-pivot compression (lower-high AND higher-low). A *value line* is frozen
+                    at the "average price during the contraction" (mean of contraction closes;
+                    config ats_value_line_mode, "midpoint" optional) and projected forward.
   2. EXPANSION    — price breaks out of the box (close beyond box ± buffer*ATR).
   3. ENTRY        — on the LTF, price PULLS BACK to its value line, and we enter in the breakout
                     direction — but ONLY if it agrees with the HTF bias (HTF price vs HTF value line).
@@ -54,7 +55,8 @@ class AtsTimeframeDetector:
         self.p = params
         self.signal_version = signal_version
         self.params_hash = params_hash
-        self.entry_mode = params.get("ats_entry_mode", "continuation")
+        self.entry_mode = params.get("ats_entry_mode", "value_fade")
+        self.value_line_mode = params.get("ats_value_line_mode", "contraction_mean")
 
         self.phase = AtsPhase.NO_SIGNAL
         self._last_epoch: int | None = None
@@ -131,7 +133,13 @@ class AtsTimeframeDetector:
         self.phase = AtsPhase.CONTRACTION
         self.box_high = view.box_high
         self.box_low = view.box_low
-        self.value_line = (view.box_high + view.box_low) / 2.0   # persistent reference line
+        # Value line = "average price during the contraction" (mean of contraction closes) by
+        # default; "midpoint" is the v2 fallback. Falls back to midpoint if the mean is unavailable.
+        if self.value_line_mode == "contraction_mean" and view.box_close_mean is not None:
+            self.value_line = view.box_close_mean
+        else:
+            self.value_line = (view.box_high + view.box_low) / 2.0
+        # persistent reference line (survives episode end until a new contraction overwrites it)
         self.c_atr = view.atr
         self.episode_id = f"ats:{self.symbol}:{self.tf}:{view.closed_bar_epoch}"
         self.bars_in_contraction = 0

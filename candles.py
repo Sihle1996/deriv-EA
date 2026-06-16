@@ -47,8 +47,10 @@ class TFView:
     # Swing-pivot contraction (Forex Master Pattern, LuxAlgo-audited): contraction_now is True on the
     # bar where a new pivot confirms a lower-high + higher-low compression; box = the bounding pivots.
     contraction_now: bool = False
-    box_high: float | None = None   # bounding swing pivot high of the contraction
-    box_low: float | None = None    # bounding swing pivot low of the contraction
+    box_high: float | None = None       # bounding swing pivot high of the contraction
+    box_low: float | None = None        # bounding swing pivot low of the contraction
+    box_close_mean: float | None = None  # mean CLOSE over the contraction-box bars ("average price
+                                         # established during the contraction"); value-line candidate
 
     @property
     def ats_warm(self) -> bool:
@@ -216,6 +218,10 @@ def _compute_view(df: pd.DataFrame, tf: str, p: dict) -> TFView | None:
             lower_high = H[ph_idx[-1]] < H[ph_idx[-2]]
             higher_low = L[pl_idx[-1]] > L[pl_idx[-2]]
             if lower_high and higher_low:
+                # "Average price established during the contraction" = mean of closes from the
+                # earliest bounding pivot through the confirmation bar (the coil region).
+                start = min(ph_idx[-1], pl_idx[-1])
                 view.update(contraction_now=True,
-                            box_high=float(H[ph_idx[-1]]), box_low=float(L[pl_idx[-1]]))
+                            box_high=float(H[ph_idx[-1]]), box_low=float(L[pl_idx[-1]]),
+                            box_close_mean=float(close.iloc[start:].mean()))
     return TFView(**view)

@@ -122,6 +122,19 @@ then `verify_feed.py` all PASS.)
 > only ATR + inside-bar contraction box. The tools (`backtest/validate/review/backfill_signals.py`) read
 > `data/signals_ats/` and trade the `entry` phase by default — no flag.
 
+**ATS v3 (2026-06-16, from the user's "Forex Master Pattern Original Training" transcript + slide):**
+Two faithfulness fixes, both as switchable variants (old behaviour still selectable), version bumped
+`ats_v2`→`ats_v3`, `ats_value_line_mode` added to `params_hash` so v2/v3 records stay distinguishable:
+- **Value line = mean of contraction CLOSES** (the training's "average price established during the
+  contraction"), not the box midpoint. `config.ats_value_line_mode="contraction_mean"` (default) |
+  `"midpoint"`. Mean computed in `candles._compute_view` (`TFView.box_close_mean`), falls back to
+  midpoint if unavailable. Drives BOTH the HTF bias gate and the LTF entry target.
+- **Default entry = `value_fade`** (was `continuation`): the slide shows expansion as a two-sided
+  liquidity sweep before the trend, so the faithful entry fades the counter-trend spike in the HTF-bias
+  direction ("counter-trend liquidity within contraction", 26:40). `ATS_ENTRY_MODE=continuation` restores
+  the old with-breakout pullback. `verify_ats.py` = 18/18 (4 new). Still NO public stop/target spec.
+  Fleet restarted onto v3 (2026-06-16); v2 signals collected before then remain in the logs, versioned.
+
 **Gate before trading (locked):** >500 reviewed ATS entries AND `validate_signals.py` showing a
 demonstrated, repeatable edge — permutation p<0.05 (family-wise corrected) AND OOS survival AND low PBO
 AND best Sharpe above the deflated/expected-max hurdle. Expected outcome on synthetics = NO edge → stay
