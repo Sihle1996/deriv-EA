@@ -90,14 +90,17 @@ class Config:
     ats_signal_version: str = "ats_v1"
     ats_htf: str = os.getenv("ATS_HTF", "15m")   # higher timeframe — sets directional bias
     ats_ltf: str = os.getenv("ATS_LTF", "1m")    # lower timeframe — gives the pullback entry
-    ats_contraction_bars: int = 2                # consecutive inside bars to confirm a contraction
+    ats_contraction_bars: int = 1                # inside bars (lower-high AND higher-low) to confirm a
+                                                 # contraction. 1 = the documented single-inside-bar
+                                                 # definition (matches how it's marked by eye); 2+ is
+                                                 # stricter and detects far fewer coils
     ats_breakout_buffer_atr: float = 0.25        # EXPANSION when close clears the box by this*ATR
     ats_pullback_tol_atr: float = 0.5            # ENTRY when LTF close returns within this*ATR of value
                                                  # (traders enter AS price approaches the line, not only
                                                  # on an exact touch; 0.0 = require a full touch/cross)
     ats_max_contraction_bars: int = 60           # abandon a contraction with no breakout within this
     ats_max_entry_bars: int = 20                 # abandon an expansion with no pullback within this
-    validate_ats_contraction_bars: tuple = (2, 3, 4, 5)  # PBO sweep — highest-leverage ATS param
+    validate_ats_contraction_bars: tuple = (1, 2, 3, 4)  # PBO sweep — highest-leverage ATS param
 
     # --- storage ------------------------------------------------------------------
     data_dir: Path = ROOT / "data"
