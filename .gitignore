@@ -9,6 +9,8 @@ data/ticks/*
 !data/ticks/.gitkeep
 data/signals/*
 !data/signals/.gitkeep
+data/signals_ats/*
+!data/signals_ats/.gitkeep
 
 # Background-run logs + PID file (run_all.py)
 logs/
