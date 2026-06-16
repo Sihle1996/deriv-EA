@@ -8,7 +8,7 @@ export default function Chart({
   candles, liveBar, tf, ats, mode,
 }: {
   candles: Candle[]; liveBar: Candle | null;
-  tf: string; ats: AtsOverlay | null; mode: "live" | "archive";
+  tf: string; ats: AtsOverlay | null; mode: "live" | "archive" | "deep";
 }) {
   const el = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);

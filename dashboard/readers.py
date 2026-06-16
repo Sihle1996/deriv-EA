@@ -118,6 +118,49 @@ def _ats_funnel(sigs: list[dict], htf: str, ltf: str) -> dict:
     }
 
 
+def deep_value_lines(tf: str, candles: list[dict]) -> list[dict]:
+    """Run the REAL single-timeframe ATS detector over a DEEP candle history (fetched live from
+    Deriv, far longer than the tick archive) to produce contraction boxes + value lines across
+    weeks. DISPLAY-ONLY — never written to the signal log, so the validated stats stay clean.
+    CPU-heavy (per-bar _compute_view, ~O(n^2)); the server calls this off the event loop."""
+    from candles import _compute_view
+    from ats_signals import AtsTimeframeDetector
+    length = CONFIG.ats_pivot_lookback
+    if len(candles) < 2 * length + 1:
+        return []
+    idx = pd.to_datetime([c["time"] for c in candles], unit="s", utc=True)
+    frame = pd.DataFrame({k: [float(c[k]) for c in candles] for k in ("open", "high", "low", "close")},
+                         index=idx)
+    det = AtsTimeframeDetector("deep", tf, _TF_SECS.get(tf, 60), CONFIG.ats_signal_params(), "deep", "deep")
+    cons = []
+    for i in range(len(frame)):
+        view = _compute_view(frame.iloc[: i + 1], tf, CONFIG.view_params())
+        if view is None:
+            continue
+        for rec in det.on_closed_bar(view):
+            if rec.phase == "contraction":
+                cons.append({"timeframe": tf, "bar_epoch": rec.bar_epoch, "value_line": rec.value_line,
+                             "contraction_high": rec.contraction_high,
+                             "contraction_low": rec.contraction_low, "phase": "contraction"})
+    return _build_value_lines(cons, tf, tf)  # htf==ltf==tf -> keeps this tf's boxes/lines
+
+
+def deep_overlay(symbol: str, tf: str, candles: list[dict]) -> dict:
+    """Deep historical overlay for the chart: structure (boxes + value lines) computed over the
+    fetched deep candles for `tf`, plus the real ladder ENTRY arrows for `tf` read from the
+    (backfilled) signal log. Shaped as an AtsOverlay with htf==ltf==tf so the existing chart draws
+    it. Cached on (symbol, tf, depth, last-candle) so it recomputes only when the data moves."""
+    key = ("deep", symbol, tf, len(candles), candles[-1]["time"] if candles else 0)
+    vls = _memo(key, 300.0, lambda: deep_value_lines(tf, candles))
+    sigs = rv._load_signals(symbol, signal_dir=CONFIG.ats_signal_dir)
+    entries = [{"bar_epoch": s["bar_epoch"], "direction": s.get("direction"),
+                "price": s.get("price_at_signal"), "tf": s["timeframe"],
+                "value_line": s.get("value_line"), "htf_bias": s.get("htf_bias")}
+               for s in sigs if s.get("phase") == "entry" and s.get("timeframe") == tf]
+    return {"symbol": symbol, "htf": tf, "ltf": tf, "value_lines": vls, "entries": entries,
+            "funnel": _ats_funnel(sigs, CONFIG.ats_htf, CONFIG.ats_ltf)}
+
+
 def backtest_summary(symbol: str, payout: float | None = None, duration_bars: int | None = None) -> dict:
     key = ("bt", symbol, payout, duration_bars)
     return _memo(key, 10.0, lambda: bt.run_backtest(symbol, payout=payout, duration_bars=duration_bars))

@@ -46,6 +46,10 @@ export const getSignals = (s: string, limit = 100): Promise<SignalRec[]> =>
 export const getBacktest = (s: string): Promise<Backtest> => j(`/api/backtest?symbol=${s}`);
 export const getHealth = (s: string): Promise<Health> => j(`/api/health?symbol=${s}`);
 export const getAts = (s: string): Promise<AtsOverlay> => j(`/api/ats?symbol=${s}`);
+/** Deep historical view: candles fetched from Deriv at `tf` + ATS overlay (htf==ltf==tf) computed over them. */
+export type DeepView = AtsOverlay & { candles: Candle[] };
+export const getDeep = (s: string, tf = "15m", count = 2000): Promise<DeepView> =>
+  j(`/api/deep?symbol=${s}&tf=${tf}&count=${count}`);
 
 /** Subscribe to the live WS feed for `symbol`; auto-reconnects on drop. */
 export function useLiveFeed(

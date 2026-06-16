@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Chart from "./Chart";
 import {
   type AtsOverlay, type Backtest, type Candle, type Health, type SignalRec,
-  getArchiveCandles, getAts, getBacktest, getCandles, getHealth, getSignals, getSymbols, useLiveFeed,
+  getArchiveCandles, getAts, getBacktest, getCandles, getDeep, getHealth, getSignals, getSymbols, useLiveFeed,
 } from "./api";
 
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h"];
-type Mode = "live" | "archive";
+type Mode = "live" | "archive" | "deep";
 
 export default function App() {
   const [symbols, setSymbols] = useState<string[]>([]);
@@ -36,9 +36,14 @@ export default function App() {
       (mode === "archive" ? getArchiveCandles(symbol, tf) : getCandles(symbol, tf))
         .then((c) => { if (!stop) setCandles(c); });
     const poll = () => {
-      loadCandles();                       // refetch candles so higher TFs stay current
+      if (mode === "deep") {
+        // Deep history: candles + overlay (boxes/value lines + entries) for the viewed tf, in one call.
+        getDeep(symbol, tf).then((d) => { if (!stop) { setCandles(d.candles); setAts(d); } });
+      } else {
+        loadCandles();                     // refetch candles so higher TFs stay current
+        getAts(symbol).then((a) => { if (!stop) setAts(a); });
+      }
       getSignals(symbol).then(setSignals);
-      getAts(symbol).then((a) => { if (!stop) setAts(a); });
       getBacktest(symbol).then(setBt);
       getHealth(symbol).then(setHealth);
     };
@@ -66,9 +71,10 @@ export default function App() {
           {TIMEFRAMES.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}
-          title="live feed vs candles resampled from the tick archive">
+          title="live feed · archive (resampled from recorded ticks) · deep (Deriv candle history, display-only indicators)">
           <option value="live">live</option>
           <option value="archive">archive</option>
+          <option value="deep">deep (history)</option>
         </select>
         <span className="price">{price !== null ? price.toFixed(5) : "—"}</span>
         {health && <span className={"badge " + (health.live ? "ok" : "bad")}>{health.live ? "LIVE" : "STALE"}</span>}

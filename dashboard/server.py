@@ -6,6 +6,7 @@ NO trading endpoints — this is a research viewer.
 """
 from __future__ import annotations
 
+import asyncio
 import glob
 import logging
 from contextlib import asynccontextmanager
@@ -86,6 +87,24 @@ def api_archive_candles(symbol: str, tf: str = "1m", count: int = 2000):
     if g is None:
         return JSONResponse({"error": f"unsupported tf {tf}"}, status_code=400)
     return readers.archive_candles(symbol, g, count)
+
+
+@app.get("/api/deep")
+async def api_deep(symbol: str, tf: str = "15m", count: int = 2000):
+    """Deep historical view: fetch `count` candles of `tf` straight from Deriv (far deeper than the
+    tick archive), run the detector over them for boxes + value lines, and attach ladder entries
+    from the signal log. Display-only. The CPU-heavy replay runs in a thread so live feeds keep
+    flowing; the result is cached in readers."""
+    f = feeds.get(symbol)
+    if not f:
+        return JSONResponse({"error": "unknown symbol"}, status_code=404)
+    g = GRANULARITY.get(tf)
+    if g is None:
+        return JSONResponse({"error": f"unsupported tf {tf}"}, status_code=400)
+    candles = await f.history_candles(g, count)
+    overlay = await asyncio.get_event_loop().run_in_executor(
+        None, readers.deep_overlay, symbol, tf, candles)
+    return {"candles": candles, **overlay}
 
 
 @app.get("/api/signals")
