@@ -126,10 +126,24 @@ class Config:
     def ats_signal_dir(self) -> Path:
         return self.data_dir / "signals_ats"
 
+    @staticmethod
+    def _tf_label_seconds(label: str) -> int:
+        """Seconds for a timeframe LABEL like '1m'/'5m'/'15m'/'1h' (number + s/m/h/d unit)."""
+        units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+        num = int("".join(c for c in label if c.isdigit()))
+        unit = "".join(c for c in label if c.isalpha()) or "m"
+        return num * units[unit]
+
+    @property
+    def ats_ladder(self) -> tuple[str, ...]:
+        """ATS timeframe ladder, ordered HIGH -> LOW (e.g. 15m, 5m, 1m). Each TF's entries are gated
+        by the TF directly above it; the top TF is bias/context only. = all configured timeframes."""
+        return tuple(sorted(self.timeframes, key=self._tf_label_seconds, reverse=True))
+
     @property
     def all_signal_timeframes(self) -> tuple[str, ...]:
-        """The timeframes the store must build a TFView for — the ATS HTF + LTF."""
-        return tuple(sorted({self.ats_htf, self.ats_ltf}))
+        """The timeframes the store must build a TFView for — the full ATS ladder (all timeframes)."""
+        return self.ats_ladder
 
     def view_params(self) -> dict:
         """Params the STORE needs to build TFViews (ATR + the swing-pivot contraction box)."""

@@ -53,7 +53,7 @@ class Snap:
 
 
 def engine() -> AtsEngine:
-    return AtsEngine("TEST", P, "15m", "1m", {"15m": 900, "1m": 60}, "ats_test", "hash")
+    return AtsEngine("TEST", P, ["15m", "1m"], {"15m": 900, "1m": 60}, "ats_test", "hash")
 
 
 # -- single-timeframe state machine --------------------------------------------------
@@ -193,6 +193,30 @@ def t_gate_blocks_no_bias() -> bool:
             and len(blocked) == 1 and blocked[0].htf_bias == "none")
 
 
+# -- timeframe ladder (3 TFs: 15m -> 5m -> 1m) ---------------------------------------
+def t_ladder_mid_tf_entry_gated() -> bool:
+    # 15m sets bias up; the 5m detector's pullback entry is kept and tagged with the 15m bias
+    # (proves the MIDDLE timeframe now produces HTF-gated entries, not just 1m).
+    eng = AtsEngine("TEST", P, ["15m", "5m", "1m"], {"15m": 900, "5m": 300, "1m": 60},
+                    "ats_test", "hash")
+    eng.on_snapshot(Snap({"15m": view(900, 99.5, contraction=True, box_high=100.0, box_low=98.0)}))
+    eng.on_snapshot(Snap({"5m": view(300, 100.0, contraction=True, box_high=101.0, box_low=99.0)}))
+    eng.on_snapshot(Snap({"5m": view(600, 102.0, contraction=False)}))            # 5m breakout up
+    out = eng.on_snapshot(Snap({"5m": view(900, 99.9, contraction=False)}))       # pullback -> entry
+    entries = [r for r in out if r.phase == "entry"]
+    return (len(entries) == 1 and entries[0].timeframe == "5m"
+            and entries[0].direction == "up" and entries[0].htf_bias == "up")
+
+
+def t_ladder_top_tf_entries_dropped() -> bool:
+    # The top TF has no higher TF to confirm it -> its entries are dropped (context only).
+    eng = AtsEngine("TEST", P, ["15m", "1m"], {"15m": 900, "1m": 60}, "ats_test", "hash")
+    eng.on_snapshot(Snap({"15m": view(900, 100.0, contraction=True, box_high=101.0, box_low=99.0)}))
+    eng.on_snapshot(Snap({"15m": view(1800, 102.0, contraction=False)}))          # breakout up
+    out = eng.on_snapshot(Snap({"15m": view(2700, 99.9, contraction=False)}))     # would-be entry
+    return [r for r in out if r.phase == "entry"] == []
+
+
 # -- pivot DETECTION (candles._compute_view) -----------------------------------------
 def _frame(highs, lows, closes):
     idx = pd.to_datetime(range(60, 60 + 60 * len(highs), 60), unit="s", utc=True)
@@ -249,6 +273,8 @@ CHECKS = [
     ("gate_keeps_aligned", t_gate_keeps_aligned),
     ("gate_blocks_counter", t_gate_blocks_counter),
     ("gate_blocks_no_bias", t_gate_blocks_no_bias),
+    ("ladder_mid_tf_entry_gated", t_ladder_mid_tf_entry_gated),
+    ("ladder_top_tf_entries_dropped", t_ladder_top_tf_entries_dropped),
     ("pivot_contraction_detected", t_pivot_contraction_detected),
     ("pivot_box_close_mean", t_pivot_box_close_mean),
     ("pivot_no_contraction_when_expanding", t_pivot_no_contraction_when_expanding),

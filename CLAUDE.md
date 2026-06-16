@@ -217,11 +217,11 @@ to profitability.
 | File | Role (ATS) |
 |------|------|
 | `candles.py` | `_compute_view` (all pandas) computes ATR + swing-pivot `contraction_now` + `box_high/low` (bounding pivots) at warm-up `atr_period+1`; `TFView.ats_warm` |
-| `ats_signals.py` | `AtsTimeframeDetector` (per-TF state machine, PERSISTENT value line for bias, `continuation`/`value_fade` modes) + `AtsEngine` (HTF sets bias → gates LTF entries; emits `entry`/`entry_blocked`). `ats_v2` |
+| `ats_signals.py` | `AtsTimeframeDetector` (per-TF state machine, PERSISTENT value line for bias, `continuation`/`value_fade` modes) + `AtsEngine` (now a **timeframe LADDER 15m→5m→1m**: each TF's entries gated by the TF above it; top TF = bias/context only; 2-TF ladder == old single pair). `ats_v3` |
 | `signals.py` | `SignalRecord` dataclass only (schema v2; `value_line`/`htf_bias`/`episode_id` + entry-quality metadata) |
-| `config.py` | `ats_*` params (`ats_pivot_lookback=5`, `ats_breakout_buffer_atr=0`, `ats_entry_mode`, `ats_htf=5m`), `ats_signal_params()`/`ats_params_hash()`, `ats_signal_dir`, `all_signal_timeframes={5m,1m}`, `view_params()`, `validate_ats_pivot_lookbacks=(3,5,8,13)` |
+| `config.py` | `ats_*` params (`ats_pivot_lookback=5`, `ats_breakout_buffer_atr=0`, `ats_entry_mode=value_fade`, `ats_value_line_mode=contraction_mean`), `ats_ladder=(15m,5m,1m)` (all timeframes, high→low) drives `all_signal_timeframes`; `ats_htf/ltf` kept for the dashboard pair; `ats_signal_params()`/`ats_params_hash()`, `validate_ats_pivot_lookbacks=(3,5,8,13)` |
 | `main.py` | store over `all_signal_timeframes`; runs `AtsEngine` → `SignalStore(ats_signal_dir)` on candle close |
-| `verify_ats.py` | **14/14 PASS** — pivot-detection + contraction/value-line/plain-breakout/pullback-entry/HTF-gate(keeps aligned, blocks counter & no-bias)/timeout/dedup |
+| `verify_ats.py` | **20/20 PASS** — pivot-detection (+box_close_mean) + contraction/value-line(midpoint & contraction_mean)/plain-breakout/pullback-entry/value_fade/HTF-gate(keeps aligned, blocks counter & no-bias)/3-TF ladder(mid-TF gated entry, top-TF entries dropped)/timeout/dedup |
 | `backfill_signals.py` | regenerate the ATS stream from the gap-free tick archive (ATS by default, no flag) |
 | `backtest_signals.py` / `validate_signals.py` / `review_signals.py` | score the ATS stream by default (tradeable phase = `entry`). validate sweeps `ats_contraction_bars` in the PBO + prints a **family-wise (Bonferroni) p-threshold** + per-market n/low-power caveat |
 | `dashboard/*` | ATS-only UI: chart draws per-contraction **box + forward value line** + purple entry arrows (no old C/E/T/R); **ATS funnel** panel; **live/archive** toggle (archive resamples the tick archive so historical value lines render in-window); ATS backtest panel |

@@ -41,7 +41,7 @@ def replay(symbol: str, candles: list[dict]) -> list:
                                 signal_params=CONFIG.view_params())
     tf_seconds = {tf: int(pd.Timedelta(CONFIG.timeframes[tf]).total_seconds())
                   for tf in CONFIG.all_signal_timeframes}
-    engine = AtsEngine(symbol, CONFIG.ats_signal_params(), CONFIG.ats_htf, CONFIG.ats_ltf,
+    engine = AtsEngine(symbol, CONFIG.ats_signal_params(), CONFIG.ats_ladder,
                        tf_seconds, CONFIG.ats_signal_version, CONFIG.ats_params_hash())
     records, prev = [], None
     for c in candles:

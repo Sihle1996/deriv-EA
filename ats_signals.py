@@ -198,42 +198,48 @@ class AtsTimeframeDetector:
 
 
 class AtsEngine:
-    """Owns an HTF detector + an LTF detector. The HTF sets bias; LTF pullback entries are emitted
-    ONLY when their direction agrees with the HTF bias. Context records (contraction/breakout) from
-    BOTH timeframes pass through (for the dashboard value line + funnel stats). Dedups output on
-    (timeframe, bar_epoch, phase) within the session (SignalStore also dedups on disk)."""
+    """A timeframe LADDER: one detector per timeframe, ordered HIGH -> LOW (e.g. 15m, 5m, 1m). Each
+    timeframe's entries are gated by the NEXT-HIGHER timeframe's bias (HTF close vs its value line),
+    so every TF is analysed: the top TF is bias+context only (no higher TF to confirm it, so its
+    entries are dropped — exactly the old HTF behaviour); every lower TF emits HTF-gated entries.
+    A 2-element ladder [htf, ltf] reproduces the original single-pair engine. Context records
+    (contraction/breakout) from ALL timeframes pass through. Dedups on (timeframe, bar_epoch, phase).
+    """
 
-    def __init__(self, symbol: str, params: dict, htf: str, ltf: str, tf_seconds: dict,
+    def __init__(self, symbol: str, params: dict, tf_ladder, tf_seconds: dict,
                  signal_version: str, params_hash: str):
-        self.htf = htf
-        self.ltf = ltf
-        self.htf_det = AtsTimeframeDetector(symbol, htf, int(tf_seconds[htf]), params,
-                                            signal_version, params_hash)
-        self.ltf_det = AtsTimeframeDetector(symbol, ltf, int(tf_seconds[ltf]), params,
-                                            signal_version, params_hash)
+        self.tfs = list(tf_ladder)                 # HIGH -> LOW
+        self.dets = {tf: AtsTimeframeDetector(symbol, tf, int(tf_seconds[tf]), params,
+                                              signal_version, params_hash)
+                     for tf in self.tfs}
+        # Convenience aliases (top = highest TF, bottom = lowest) for callers/tests/dashboard.
+        self.htf = self.tfs[0] if self.tfs else None
+        self.ltf = self.tfs[-1] if self.tfs else None
+        self.htf_det = self.dets.get(self.htf) if self.tfs else None
+        self.ltf_det = self.dets.get(self.ltf) if self.tfs else None
         self._seen: set[tuple[str, int, str]] = set()
 
     def on_snapshot(self, snap) -> list[SignalRecord]:
         out: list[SignalRecord] = []
-        # HTF first so its value_line/bias reflect the current bar before gating LTF entries.
-        htf_view = snap.views.get(self.htf)
-        if htf_view is not None:
-            for rec in self.htf_det.on_closed_bar(htf_view):
-                if rec.phase != P_ENTRY:        # HTF is for bias + context only; drop HTF entries
-                    self._add(rec, out)
-
-        ltf_view = snap.views.get(self.ltf)
-        if ltf_view is not None:
-            bias = self.htf_det.bias
-            for rec in self.ltf_det.on_closed_bar(ltf_view):
+        # Walk HIGH -> LOW so each higher TF's bias reflects the current bar before it gates the
+        # timeframe below it. The TF directly above `tf` in the ladder is its bias/gate source.
+        for i, tf in enumerate(self.tfs):
+            view = snap.views.get(tf)
+            if view is None:
+                continue
+            higher_det = self.dets[self.tfs[i - 1]] if i > 0 else None  # None for the top TF
+            bias = higher_det.bias if higher_det is not None else None
+            for rec in self.dets[tf].on_closed_bar(view):
                 if rec.phase == P_ENTRY:
-                    hv, hl = self.htf_det.value_line, self.htf_det.last_close
+                    if higher_det is None:
+                        continue  # top of ladder: no higher TF to confirm -> context only, drop entry
+                    hv, hl = higher_det.value_line, higher_det.last_close
                     hdist = abs(hl - hv) if hv is not None and hl is not None else None
                     if bias is not None and rec.direction == bias:
                         rec = replace(rec, htf_bias=bias, htf_dist_from_value_line=hdist)
                     else:
-                        # HTF gate rejected it (no bias or counter-bias) — keep as a NON-tradeable
-                        # blocked candidate so the funnel shows where entries are filtered out.
+                        # Higher-TF gate rejected it (no bias or counter-bias) — keep as a
+                        # NON-tradeable blocked candidate so the funnel shows where entries drop out.
                         rec = replace(rec, phase=P_ENTRY_BLOCKED, htf_bias=(bias or "none"),
                                       htf_dist_from_value_line=hdist)
                 self._add(rec, out)

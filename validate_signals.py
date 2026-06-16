@@ -129,7 +129,7 @@ def _ats_pnl_series(symbol, ep, px, candles, pivot_lookback, buffer, duration_ba
                                 signal_timeframes=CONFIG.all_signal_timeframes, signal_params=vp)
     tf_seconds = {tf: int(pd.Timedelta(CONFIG.timeframes[tf]).total_seconds())
                   for tf in CONFIG.all_signal_timeframes}
-    engine = AtsEngine(symbol, p, CONFIG.ats_htf, CONFIG.ats_ltf, tf_seconds, "validate", "sweep")
+    engine = AtsEngine(symbol, p, CONFIG.ats_ladder, tf_seconds, "validate", "sweep")
     dur = duration_bars * 60  # ATS entries are on the 1m LTF
     series, prev = [], None
     for c in candles:

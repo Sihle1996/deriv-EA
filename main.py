@@ -47,7 +47,7 @@ class Spine:
             for tf in cfg.all_signal_timeframes
         }
         self.ats_engine = AtsEngine(
-            cfg.symbol, cfg.ats_signal_params(), cfg.ats_htf, cfg.ats_ltf, tf_seconds,
+            cfg.symbol, cfg.ats_signal_params(), cfg.ats_ladder, tf_seconds,
             cfg.ats_signal_version, cfg.ats_params_hash(),
         )
         self.ats_store = SignalStore(cfg.ats_signal_dir, cfg.symbol, cfg.signal_flush_every)
