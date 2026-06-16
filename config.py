@@ -49,25 +49,10 @@ class Config:
     history_count: int = 1000          # base candles to seed on connect (~16h of 1m)
     max_base_rows: int = 5000          # cap base frame to bound memory during the soak
 
-    # --- Phase 2: signal research engine (detect + LOG only; NO trading) ----------
-    # Detector runs on candle CLOSE, consumes MarketSnapshot.views only. See signals.py.
-    signal_version: str = "phase2_v2"  # human-readable rule tag; bump when logic/defaults change
-                                       # v2 = added the TREND/REVERSAL third phase after expansion
-    signal_timeframes: tuple[str, ...] = ("1m", "5m")
-    atr_period: int = 14               # Wilder ATR period
-    bb_window: int = 20                # Bollinger window for band-width volatility measure
-    bb_std: float = 2.0               # Bollinger std multiplier
-    vol_lookback: int = 100            # window for the band-width percentile/z-score baseline
-    contraction_pct: float = 0.20      # enter CONTRACTION when bw_percentile <= this
-    contraction_exit_pct: float = 0.40 # hysteresis: re-arm only after bw_percentile rises above this
-    contraction_range_bars: int = 20   # bars used to freeze the breakout range at contraction entry
-    breakout_atr_mult: float = 1.0     # EXPANSION when close breaks range by N*atr_at_contraction
-    max_contraction_bars: int = 60     # abandon a contraction (no signal) if no breakout within this
-    # Phase 3 of the pattern: after an expansion breakout, track whether the move CONTINUES (trend)
-    # or retraces back through the breakout level (reversal). On a CSPRNG there is no momentum, so
-    # this is expected to be ~50/50 (no edge) — it's logged to MEASURE that, not to trade it.
-    trend_continue_atr: float = 1.0    # TREND if price extends this*ATR beyond the expansion close
-    trend_max_bars: int = 20           # give up tracking the post-expansion move after this many bars
+    # --- ATS Master Pattern detector (ats_signals.py) — detect + LOG only, NO trading -------------
+    # The ONLY methodology: TradeATS value-line + HTF→LTF pullback. Detector runs on candle CLOSE,
+    # consumes MarketSnapshot.views only. See ats_signals.py.
+    atr_period: int = 14               # Wilder ATR period (used by the contraction box / breakout buffer)
     signal_flush_every: int = 1        # write-through JSONL (tiny volume; survive ungraceful kills)
     # review_signals.py (offline outcome measurement)
     outcome_horizon_bars: int = 10     # forward window per signal, in bars of its timeframe
@@ -80,13 +65,7 @@ class Config:
     n_permutations: int = 2000         # Monte-Carlo null draws for the permutation test
     walk_forward_oos_frac: float = 0.30  # fraction of (time-ordered) trades held out as out-of-sample
     cscv_blocks: int = 10              # S: time blocks for CSCV / Probability of Backtest Overfitting
-    validate_contraction_pcts: tuple = (0.10, 0.15, 0.20, 0.25, 0.30)  # param sweep for PBO
-    validate_breakout_mults: tuple = (0.5, 1.0, 1.5)                    # param sweep for PBO
 
-    # --- ATS Master Pattern detector (ats_signals.py; SEPARATE stream, NO trading) ----------------
-    # A faithful encoding of the TradeATS value-line + HTF→LTF pullback method, run alongside the
-    # Phase-2 breakout detector and written to its own data/signals_ats/ so the two never collide.
-    ats_enabled: bool = os.getenv("ATS_ENABLED", "true").lower() == "true"
     ats_signal_version: str = "ats_v1"
     ats_htf: str = os.getenv("ATS_HTF", "15m")   # higher timeframe — sets directional bias
     ats_ltf: str = os.getenv("ATS_LTF", "1m")    # lower timeframe — gives the pullback entry
@@ -126,23 +105,17 @@ class Config:
         return self.data_dir / "ticks"
 
     @property
-    def signal_dir(self) -> Path:
-        return self.data_dir / "signals"
-
-    @property
     def ats_signal_dir(self) -> Path:
         return self.data_dir / "signals_ats"
 
     @property
     def all_signal_timeframes(self) -> tuple[str, ...]:
-        """Union of Phase-2 + ATS timeframes — the store computes a TFView for each of these."""
-        return tuple(sorted(set(self.signal_timeframes) | {self.ats_htf, self.ats_ltf}))
+        """The timeframes the store must build a TFView for — the ATS HTF + LTF."""
+        return tuple(sorted({self.ats_htf, self.ats_ltf}))
 
     def view_params(self) -> dict:
-        """Params the STORE needs to build TFViews for BOTH detectors (Phase-2 + ATS). Extra keys
-        are harmless to _compute_view; this carries ats_contraction_bars so the box window honors
-        config overrides."""
-        return {**self.signal_params(), "ats_contraction_bars": self.ats_contraction_bars}
+        """Params the STORE needs to build TFViews (ATR + the inside-bar contraction box)."""
+        return {"atr_period": self.atr_period, "ats_contraction_bars": self.ats_contraction_bars}
 
     def ats_signal_params(self) -> dict:
         """Canonical ATS detector params — single source for AtsEngine and ats_params_hash."""
@@ -159,30 +132,6 @@ class Config:
         import hashlib
         import json
         blob = json.dumps(self.ats_signal_params(), sort_keys=True).encode()
-        return hashlib.sha1(blob).hexdigest()[:12]
-
-    def signal_params(self) -> dict:
-        """Canonical detector params — the single source for both SignalEngine and params_hash.
-        Order matters for the hash; keep it stable."""
-        return {
-            "atr_period": self.atr_period,
-            "bb_window": self.bb_window,
-            "bb_std": self.bb_std,
-            "vol_lookback": self.vol_lookback,
-            "contraction_pct": self.contraction_pct,
-            "contraction_exit_pct": self.contraction_exit_pct,
-            "contraction_range_bars": self.contraction_range_bars,
-            "breakout_atr_mult": self.breakout_atr_mult,
-            "max_contraction_bars": self.max_contraction_bars,
-            "trend_continue_atr": self.trend_continue_atr,
-            "trend_max_bars": self.trend_max_bars,
-        }
-
-    def params_hash(self) -> str:
-        """Short stable fingerprint of the detector params, recorded on every signal."""
-        import hashlib
-        import json
-        blob = json.dumps(self.signal_params(), sort_keys=True).encode()
         return hashlib.sha1(blob).hexdigest()[:12]
 
 

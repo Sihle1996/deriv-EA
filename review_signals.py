@@ -34,7 +34,7 @@ TF_SECONDS = {"1m": 60, "5m": 300, "15m": 900}
 
 
 def _load_signals(symbol: str, signal_dir=None) -> list[dict]:
-    base = signal_dir if signal_dir is not None else CONFIG.signal_dir
+    base = signal_dir if signal_dir is not None else CONFIG.ats_signal_dir
     out = []
     for f in sorted(glob.glob(str(base / symbol / "*.jsonl"))):
         with open(f, encoding="utf-8") as fh:
@@ -123,14 +123,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbol", default=CONFIG.symbol)
     ap.add_argument("--tf", default=None, help="filter timeframe (e.g. 1m, 5m)")
-    ap.add_argument("--phase", default=None, help="filter phase (contraction|expansion|entry)")
-    ap.add_argument("--ats", action="store_true",
-                    help="review the ATS Master Pattern stream (data/signals_ats/); entries use --phase entry")
+    ap.add_argument("--phase", default=None, help="filter phase (contraction|breakout|entry)")
     ap.add_argument("--horizon", type=int, default=CONFIG.outcome_horizon_bars)
     ap.add_argument("--seed", type=int, default=42, help="null-model RNG seed (reproducible)")
     args = ap.parse_args()
 
-    signals = _load_signals(args.symbol, signal_dir=CONFIG.ats_signal_dir if args.ats else None)
+    signals = _load_signals(args.symbol)
     if args.tf:
         signals = [s for s in signals if s.get("timeframe") == args.tf]
     if args.phase:
@@ -158,7 +156,7 @@ def main() -> None:
         groups.setdefault(key, []).append(o)
         per_signal.append({**{k: s.get(k) for k in
                               ("timeframe", "phase", "direction", "bar_epoch", "bar_close_epoch",
-                               "price_at_signal", "bw_percentile", "bbw_zscore")}, **o})
+                               "price_at_signal", "value_line", "htf_bias")}, **o})
 
     # NULL MODEL: for each scored DIRECTIONAL signal, draw a random valid epoch with the same
     # direction + horizon, and compute the same outcome. If real ≈ null, there's no edge.
@@ -213,7 +211,7 @@ def main() -> None:
     # Per-signal CSV for spreadsheet review.
     if per_signal:
         date = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-        out = CONFIG.signal_dir / args.symbol / f"_outcomes_{date}.csv"
+        out = CONFIG.ats_signal_dir / args.symbol / f"_outcomes_{date}.csv"
         with open(out, "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=list(per_signal[0].keys()))
             w.writeheader(); w.writerows(per_signal)

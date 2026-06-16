@@ -34,9 +34,9 @@ class Bar:
 
 @dataclass(frozen=True)
 class TFView:
-    """Per-timeframe indicator VALUES for the signal detector to consume — plain floats only,
-    so the detector never touches pandas. Built from CLOSED bars (no forming bar). Indicator
-    fields are None until enough closed bars exist (the warm-up gate). See _compute_view."""
+    """Per-timeframe values for the ATS detector to consume — plain floats only, so the detector
+    never touches pandas. Built from CLOSED bars (no forming bar). Indicator fields are None until
+    enough closed bars exist (the warm-up gate, atr_period+1). See _compute_view."""
     tf: str
     closed_bar_epoch: int       # open-time epoch of the last CLOSED bar (the detection bar)
     close: float
@@ -44,21 +44,9 @@ class TFView:
     low: float
     n_bars: int                 # closed bars available (warm-up gate)
     atr: float | None = None
-    band_width: float | None = None       # dimensionless volatility measure (see _compute_view)
-    bw_threshold: float | None = None      # contraction quantile of band_width over vol_lookback
-    bw_percentile: float | None = None     # rank of current band_width in [0,1] within vol_lookback
-    bbw_zscore: float | None = None        # (band_width - mean) / std over vol_lookback
-    range_high: float | None = None        # high over the last contraction_range_bars closed bars
-    range_low: float | None = None         # low  over the last contraction_range_bars closed bars
-    # ATS Master Pattern fields — computed at a LOWER warm-up gate (atr_period+1) than the Bollinger
-    # machinery above, so the geometric/inside-bar detector can act long before the percentile warms.
-    inside_run: int | None = None           # consecutive closed bars each with lower-high AND higher-low
-    box_high: float | None = None           # high over the last ats_contraction_bars closed bars
-    box_low: float | None = None            # low  over the last ats_contraction_bars closed bars
-
-    @property
-    def warm(self) -> bool:
-        return self.band_width is not None and self.bw_percentile is not None
+    inside_run: int | None = None   # consecutive closed bars each with lower-high AND higher-low
+    box_high: float | None = None   # high over the last (ats_contraction_bars+1) closed bars
+    box_low: float | None = None    # low  over the last (ats_contraction_bars+1) closed bars
 
     @property
     def ats_warm(self) -> bool:
@@ -188,13 +176,9 @@ class MultiTimeframeStore:
 
 
 def _compute_view(df: pd.DataFrame, tf: str, p: dict) -> TFView | None:
-    """Build a TFView (plain floats) from a CLOSED-bar OHLC frame. Returns None if empty.
-    Indicator fields stay None until enough closed bars exist (warm-up gate). All pandas lives
-    here so the detector downstream only ever sees floats.
-
-    Volatility measure = Bollinger band width: (2*bb_std*stdev(close,w)) / SMA(close,w) — it is
-    dimensionless, so 1m and 5m are directly comparable. Contraction is judged by where the
-    current band width sits within its own recent distribution (percentile + z-score)."""
+    """Build a TFView (plain floats) from a CLOSED-bar OHLC frame for the ATS detector. Returns
+    None if empty. Indicator fields stay None until atr_period+1 closed bars exist (warm-up gate).
+    All pandas lives here so the detector downstream only ever sees floats."""
     if df is None or df.empty:
         return None
     close, high, low = df["close"], df["high"], df["low"]
@@ -204,13 +188,8 @@ def _compute_view(df: pd.DataFrame, tf: str, p: dict) -> TFView | None:
                 high=float(high.iloc[-1]), low=float(low.iloc[-1]), n_bars=n)
 
     atr_period = int(p.get("atr_period", 14))
-    bb_window = int(p.get("bb_window", 20))
-    bb_std = float(p.get("bb_std", 2.0))
-    vol_lookback = int(p.get("vol_lookback", 100))
-    range_bars = int(p.get("contraction_range_bars", 20))
-    ats_cbars = int(p.get("ats_contraction_bars", 2))
+    ats_cbars = int(p.get("ats_contraction_bars", 1))
 
-    # --- Light-weight ATS layer: warms at atr_period+1 closed bars, well before the Bollinger gate.
     # ATR (Wilder ~ EMA with alpha=1/period) + inside-bar compression run + the contraction box.
     if n >= atr_period + 1:
         prev_close = close.shift(1)
@@ -230,27 +209,4 @@ def _compute_view(df: pd.DataFrame, tf: str, p: dict) -> TFView | None:
         k = ats_cbars + 1
         view.update(atr=atr, inside_run=int(run),
                     box_high=float(high.iloc[-k:].max()), box_low=float(low.iloc[-k:].min()))
-
-    # --- Bollinger percentile layer (Phase-2): needs a full lookback window of *defined* band-width
-    # values (band width is NaN for the first bb_window-1 bars), plus enough bars for ATR.
-    min_bars = max(atr_period + 1, bb_window + vol_lookback)
-    if n < min_bars:
-        return TFView(**view)  # not warm yet — ATS fields may be present, Bollinger fields None
-
-    # Bollinger band width series, then its recent distribution.
-    sma = close.rolling(bb_window).mean()
-    sd = close.rolling(bb_window).std(ddof=0)
-    bw_series = ((2 * bb_std * sd) / sma).dropna()
-    recent = bw_series.iloc[-vol_lookback:]
-    bw_t = float(bw_series.iloc[-1])
-    r_mean, r_std = float(recent.mean()), float(recent.std(ddof=0))
-
-    view.update(
-        band_width=bw_t,  # atr already set in the ATS layer above (min_bars >= atr_period+1)
-        bw_threshold=float(recent.quantile(p.get("contraction_pct", 0.20))),
-        bw_percentile=float((recent <= bw_t).mean()),
-        bbw_zscore=((bw_t - r_mean) / r_std) if r_std > 0 else 0.0,
-        range_high=float(high.iloc[-range_bars:].max()),
-        range_low=float(low.iloc[-range_bars:].min()),
-    )
     return TFView(**view)

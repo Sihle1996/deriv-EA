@@ -172,10 +172,6 @@ class AtsTimeframeDetector:
             bar_epoch=view.closed_bar_epoch,
             bar_close_epoch=bar_close,
             price_at_signal=view.close,
-            band_width=view.band_width,
-            bw_threshold=view.bw_threshold,
-            bw_percentile=view.bw_percentile,
-            bbw_zscore=view.bbw_zscore,
             atr=view.atr,
             atr_at_contraction=self.c_atr,
             contraction_high=self.box_high,   # the ATS box = contraction range

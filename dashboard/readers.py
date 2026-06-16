@@ -28,7 +28,7 @@ def _memo(key: tuple, ttl: float, fn):
 
 
 def recent_signals(symbol: str, limit: int = 100) -> list[dict]:
-    sigs = rv._load_signals(symbol)
+    sigs = rv._load_signals(symbol)  # ATS stream (review._load_signals defaults to ats_signal_dir)
     sigs.sort(key=lambda s: s.get("bar_epoch", 0), reverse=True)
     return sigs[:limit]
 
@@ -129,7 +129,7 @@ def health(symbol: str) -> dict:
 
 def _health(symbol: str) -> dict:
     files = sorted(glob.glob(str(CONFIG.tick_dir / symbol / "*.parquet")))
-    sig_files = glob.glob(str(CONFIG.signal_dir / symbol / "*.jsonl"))
+    sig_files = glob.glob(str(CONFIG.ats_signal_dir / symbol / "*.jsonl"))
     sig_count = sum(sum(1 for _ in open(f, encoding="utf-8")) for f in sig_files)
     if not files:
         return {"symbol": symbol, "ticks": 0, "signals": sig_count, "last_tick_age_s": None,

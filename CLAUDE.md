@@ -91,11 +91,11 @@ python main.py              # NO token needed; stream + persist; Ctrl-C flushes 
 python verify_feed.py       # feed-quality gate (also tokenless)
 ```
 
-**Multi-asset background run (Phase 2 collection):** `python run_all.py` launches one DETACHED
-`main.py` per symbol (edit `SYMBOLS`; currently `stpRNG` + `1HZ50V` = Step Index + Volatility 50
-(1s)), logging to `logs/<symbol>.log`, PIDs in `logs/pids.txt`; `python stop_all.py` stops them
-(`taskkill /T /F`, but each restart backfills the gap). Each symbol writes to its own
-`data/{ticks,signals}/<symbol>/`. Launcher uses the venv **`pythonw.exe`** (windowless) on purpose:
+**Multi-asset background run (ATS collection):** `python run_all.py` launches one DETACHED
+`main.py` per symbol (edit `SYMBOLS`; currently `stpRNG` + `1HZ50V` synthetics + `frxUSDJPY`/`frxXAUUSD`/
+`OTC_NDX` real markets), logging to `logs/<symbol>.log`, PIDs in `logs/pids.txt`; `python stop_all.py`
+stops them (`taskkill /T /F`, but each restart backfills the gap). Each symbol writes to its own
+`data/{ticks,signals_ats}/<symbol>/`. Launcher uses the venv **`pythonw.exe`** (windowless) on purpose:
 the venv `python.exe` is a stub that spawns a worker child which POPS A CONSOLE WINDOW per bot;
 `pythonw.exe` runs as a single windowless process. (Also why it's a Python launcher, not PowerShell:
 `Start-Process` + output redirection throws "Item has already been added: COMSPEC" on envs with
@@ -110,35 +110,22 @@ held the archive seam-free for a full day. Phase 1 gate cleared → Phase 2 is u
 (Original gate: run `main.py` for 24h — no unrecovered disconnects, no missing candles, flat memory,
 then `verify_feed.py` all PASS.)
 
-## Phase 2 = BUILT & verified (signal-only research engine, NO trading)
+## Signal research engine = ATS Master Pattern ONLY (NO trading)
 
-Volatility contraction/expansion detector on 1m + 5m. Plan: `.claude/plans/indexed-honking-mango.md`.
+> **The original Phase-2 breakout detector was REMOVED (2026-06-16).** The user only ever wanted the
+> ATS method, so the volatility-contraction/breakout detector (`TimeframeDetector`/`SignalEngine`,
+> Bollinger band-width percentile, `Phase` TREND/REVERSAL, `data/signals/`, `verify_signals.py`, the
+> `--ats` flags, and all `signal_*`/`signal_params()`/`params_hash()` config) is gone. The ATS detector
+> in `ats_signals.py` is now the sole methodology and the default everywhere. See the **ATS Master
+> Pattern stream** section below for the file table and current status. `signals.py` is now just the
+> `SignalRecord` dataclass (schema v2, ATS fields; bw_* fields dropped). `candles._compute_view` computes
+> only ATR + inside-bar contraction box. The tools (`backtest/validate/review/backfill_signals.py`) read
+> `data/signals_ats/` and trade the `entry` phase by default — no flag.
 
-| File | Role (Phase 2) |
-|------|------|
-| `candles.py` | added `TFView` + `MarketSnapshot.views`; `closed_frame(tf)` (closed bars only); `_compute_view` (ATR/Bollinger band-width/percentile/z-score — ALL pandas stays here) |
-| `signals.py` | pure detector: `Phase`, `SignalRecord`, `TimeframeDetector`, `SignalEngine`. State machine NO_SIGNAL→CONTRACTION→EXPANSION→**TREND** then trend(continue)/reversal(retrace through breakout). No pandas/IO. `signal_version="phase2_v2"` (v2 added the 3rd phase). |
-| `storage.py` | `SignalStore` → `data/signals/<symbol>/<UTC-date>.jsonl` (dedup on `(tf,bar_epoch,phase)`, write-through) |
-| `main.py` | builds snapshot ONCE on candle close → print + `_run_signals`; skips signals on history reload; flushes signal_store on exit |
-| `verify_signals.py` | offline detector regression — **11/11 PASS** (transitions, warm-up, timeout, hysteresis, dedup, closed/partial-bar) |
-| `review_signals.py` | offline outcome measurement: forward returns/MFE/MAE/first-touch vs a **null model**, look-ahead firewall (`epoch > bar_close_epoch`), per-signal CSV |
-| `backfill_signals.py` | regenerate the COMPLETE signal set offline from the gap-free tick archive (replay store+engine), deduped vs the live log — recovers signals the live detector missed during outages. `--dry-run` is read-only. |
-| `validate_signals.py` | **honest statistical validation** (the research-mandated "fix"): Monte-Carlo permutation test (p-value vs random entries), walk-forward IS/OOS, **PBO via CSCV** (Bailey/López de Prado), deflated/expected-max Sharpe. Vectorized `_fast_pnl_series` (rolling indicators computed once → real detector) makes the param sweep O(n)/config. Prints a LOW-POWER caveat under n=200. Pure-math core unit-tested in `verify_validation.py` (9/9). |
-| `verify_validation.py` | tests the tester — perm_pvalue / cscv_pbo / expected_max_sharpe on known-truth inputs (edge→low p/low PBO; random→p~0.5/PBO~0.5). |
-| `backtest_signals.py` | **contract-economics backtester**: replays directional (expansion) signals as simulated Deriv Rise/Fall contracts vs archived ticks, applies the payout haircut (default 95%), reports simulated P&L + ROI vs a null model. Break-even win rate = 1/(1+payout)=51.3%; on a CSPRNG you get ~50% → structurally negative (the house edge). Look-ahead firewall: enter only at first tick after `bar_close_epoch`. |
-
-Detector consumes `MarketSnapshot.views` (plain floats) only — pandas never leaks past the store.
-Config params live in `config.py` (`signal_*`, `signal_params()`, `params_hash()`), env-overridable.
-
-**Verified offline against the real 24h archive:** 1471 candles → 47 signals (22/12/8 on 1m,
-3/1/1 on 5m); SignalStore dedup + daily rollover OK; review scoring ran (≈no edge, as expected on
-a CSPRNG — the correct result). NOT yet live-tested (the running soak is pre-Phase-2 code; restart
-`main.py` to go live).
-
-**Gate before Phase 3 (locked):** >500 reviewed signals AND `validate_signals.py` showing a
-demonstrated, repeatable edge — permutation p<0.05 AND OOS survival AND low PBO AND best Sharpe
-above the deflated/expected-max hurdle. Expected outcome = NO edge → stay in research; that's
-success, not failure. No proposal/buy/sell code until cleared.
+**Gate before trading (locked):** >500 reviewed ATS entries AND `validate_signals.py` showing a
+demonstrated, repeatable edge — permutation p<0.05 (family-wise corrected) AND OOS survival AND low PBO
+AND best Sharpe above the deflated/expected-max hurdle. Expected outcome on synthetics = NO edge → stay
+in research; that's success, not failure. No proposal/buy/sell code until cleared.
 
 **Deep-research conclusion (2026-06-15, 25 primary-sourced claims, 0 refuted):** neither SMC nor the
 Forex Master Pattern has verified predictive edge; on a CSPRNG synthetic an edge is impossible by
@@ -185,46 +172,40 @@ none of which are bugs:
 - Signals accrue slower (only during sessions) → real symbols reach the 500-gate later than synthetics.
 - (Not yet done: session-aware coverage in check_archive/health to label closures vs anomalies.)
 
-## ATS Master Pattern stream = BUILT (2026-06-16) — the user's manual method, made testable
+## ATS Master Pattern = the methodology (sole detector, NO trading)
 
-The user trades the **TradeATS "Master Pattern"** by hand and reports an edge on our current assets.
-Our Phase-2 detector enters on the **breakout**; ATS is a **value-line + HTF→LTF pullback** method —
-a different system, so the prior "no edge" never tested the user's actual claim. This is a SEPARATE,
-parallel research stream (NOT trading) so the honest harness can adjudicate the claim. Plan:
-`.claude/plans/indexed-honking-mango.md`.
+The user trades the **TradeATS "Master Pattern"** by hand. It is now the ONLY methodology (the old
+breakout detector was removed). Plan: `.claude/plans/indexed-honking-mango.md`.
 
-The method (faithful to the indicator sources): **contraction** = consecutive inside bars (lower-high
-AND higher-low) → freeze a **value line** at the box midpoint; **expansion** = close clears the box by
-`buffer*ATR`; **entry** = on the LTF, price PULLS BACK to its value line AND the move agrees with the
-**HTF bias** (HTF close vs its own value line). HTF gate is the heart of it.
+The method (faithful to the indicator sources): **contraction** = inside bar(s) (lower-high AND
+higher-low; `ats_contraction_bars=1` = the documented single-inside-bar definition, matches the eye)
+→ freeze a **value line** at the box midpoint, projected forward; **expansion** = close clears the box
+by `ats_breakout_buffer_atr*ATR`; **entry** = on the LTF (1m), price PULLS BACK to its value line
+(within `ats_pullback_tol_atr*ATR`) AND the move agrees with the **HTF (15m) bias** (HTF close vs its
+own value line). The HTF gate is the heart of it; gated pullbacks are logged as `entry_blocked`.
 
 | File | Role (ATS) |
 |------|------|
-| `candles.py` | `TFView` gains `inside_run`/`box_high`/`box_low` + `ats_warm`; `_compute_view` computes ATR + inside-bar run + box at a LOWER gate (`atr_period+1`) so 15m warms in ~15 bars, independent of the Bollinger `vol_lookback` |
-| `ats_signals.py` | `AtsPhase`, `AtsTimeframeDetector` (per-TF state machine, PERSISTENT value line for bias), `AtsEngine` (HTF sets bias → gates LTF pullback entries). `signal_version="ats_v1"`. Reuses `SignalRecord` + new optional fields (`value_line`, `htf_bias`, `dist_from_value_line`, `bars_since_expansion`, `htf_dist_from_value_line`); `episode_id` ties contraction→breakout→entry |
-| `config.py` | `ats_*` params, `ats_signal_params()`/`ats_params_hash()`, `ats_signal_dir` (`data/signals_ats/`), `all_signal_timeframes` (= Phase-2 ∪ {15m,1m}), `view_params()`, `validate_ats_contraction_bars=(2,3,4,5)` |
-| `main.py` | builds the store over `all_signal_timeframes`; runs `AtsEngine` → its OWN `SignalStore(ats_signal_dir)` alongside Phase-2 (gated on `ats_enabled`) |
+| `candles.py` | `_compute_view` (all pandas) computes ATR + inside-bar `inside_run` + contraction `box_high/low` at warm-up `atr_period+1`; `TFView.ats_warm` |
+| `ats_signals.py` | `AtsTimeframeDetector` (per-TF state machine, PERSISTENT value line for bias) + `AtsEngine` (HTF sets bias → gates LTF entries; emits `entry`/`entry_blocked`). `ats_v1` |
+| `signals.py` | `SignalRecord` dataclass only (schema v2; `value_line`/`htf_bias`/`episode_id` + entry-quality metadata) |
+| `config.py` | `ats_*` params, `ats_signal_params()`/`ats_params_hash()`, `ats_signal_dir`, `all_signal_timeframes={15m,1m}`, `view_params()`, `validate_ats_contraction_bars=(1,2,3,4)` |
+| `main.py` | store over `all_signal_timeframes`; runs `AtsEngine` → `SignalStore(ats_signal_dir)` on candle close |
 | `verify_ats.py` | **13/13 PASS** — contraction/value-line/breakout/buffer/pullback-entry/HTF-gate(keeps aligned, blocks counter & no-bias)/timeout/dedup |
-| `backfill_signals.py --ats` | regenerate the ATS stream from the gap-free tick archive |
-| `backtest_signals.py --ats` / `validate_signals.py --ats` / `review_signals.py --ats` | score the ATS stream (tradeable phase = `entry`). validate sweeps `ats_contraction_bars` in the PBO and prints a **family-wise (Bonferroni) p-threshold** + per-market n/low-power caveat |
-| `dashboard/{readers,server}.py` + `web/src/{api,App,Chart}.tsx` | `/api/ats` → value lines (stepped blue line) + ATS entry arrows (purple) on the 15m/1m chart |
+| `backfill_signals.py` | regenerate the ATS stream from the gap-free tick archive (ATS by default, no flag) |
+| `backtest_signals.py` / `validate_signals.py` / `review_signals.py` | score the ATS stream by default (tradeable phase = `entry`). validate sweeps `ats_contraction_bars` in the PBO + prints a **family-wise (Bonferroni) p-threshold** + per-market n/low-power caveat |
+| `dashboard/*` | ATS-only UI: chart draws per-contraction **box + forward value line** + purple entry arrows (no old C/E/T/R); **ATS funnel** panel; **live/archive** toggle (archive resamples the tick archive so historical value lines render in-window); ATS backtest panel |
 
-**Separate dir/`signal_version` → zero collision** with Phase-2 (dedup key is `(tf,bar_epoch,phase)`).
+**Anti-overfit guardrail (locked):** entry-quality metadata is for analysis only — any FILTER derived
+from it (e.g. "pullback within 3 bars") is a new config and MUST enter the PBO sweep, never a cherry-pick.
 
-**Anti-overfit guardrail (locked):** the entry-quality metadata is for analysis only — any FILTER
-derived from it (e.g. "pullback within 3 bars") is a new config and MUST enter the PBO sweep, never a
-post-hoc cherry-pick.
-
-**Reality found on the current ~24h archives:** ATS is **selective + data-hungry**. On stpRNG (2994
-candles) it logged 16 records (7+7 contraction/breakout on 1m, 1+1 on 15m) but **0 entries**: the 1m
-detector made only ~4 raw entry candidates, and the 15m HTF contracted only once so its bias was
-undefined ~69% of the time → the gate (correctly) dropped them. This is faithful ATS, not a bug — it
-means the manual-edge claim **can't yet be confirmed or denied** on this data. The bots now collect ATS
-live (restart needed to pick up the new code); validate `--ats` correctly reports INSUFFICIENT DATA
-until entries accumulate toward the 500-gate. `ats_pullback_tol_atr=0.5` (enter near value, not only on
-exact touch) keeps it realistic without manufacturing signals. Honest expectation unchanged: synthetics
-= no edge by construction (control); real markets = measured honestly, only a finding if it clears
-family-wise p AND OOS AND low PBO AND real n.
+**Result on the stpRNG archive (cbars=1, ~3000 candles):** 101 1m contractions / 6 15m / **42 entries**.
+Backtest 46.3% win (below 51.3% break-even) but beats random; **validate = NO EDGE** (permutation p=0.53,
+OOS doesn't survive, **PBO=1.00**, Sharpe below hurdle) — exactly correct for a CSPRNG control, and proof
+the harness is honest. **Real markets** (USD/JPY, Gold, NAS100) only have ~2.4h of session data each →
+15m HTF not yet warm → 0 entries → not testable yet; they accumulate slowly (market hours). The funnel
+panel shows where the chain collapses (`entry_blocked: no HTF bias` = HTF setup scarcity). Restart the
+bots after any detector change to collect live.
 
 ## Later: Phase 3+ (NOT started)
 Trade execution + risk layer (stake cap, daily-loss stop, kill switch) behind the new-Options-API

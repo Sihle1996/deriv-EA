@@ -19,7 +19,6 @@ from ats_signals import AtsEngine
 from candles import MultiTimeframeStore
 from config import CONFIG
 from deriv_client import DerivClient
-from signals import SignalEngine
 from storage import SignalStore, TickStore
 
 logging.basicConfig(
@@ -33,8 +32,7 @@ log = logging.getLogger("deriv.main")
 class Spine:
     def __init__(self, cfg):
         self.cfg = cfg
-        params = cfg.signal_params()
-        # The store computes a TFView for every timeframe BOTH detectors need (Phase-2 + ATS).
+        # The store computes a TFView (ATR + inside-bar contraction box) for the ATS HTF + LTF.
         self.store = MultiTimeframeStore(
             cfg.symbol, cfg.timeframes, cfg.max_base_rows,
             base_granularity=cfg.base_granularity,
@@ -42,26 +40,17 @@ class Spine:
             signal_params=cfg.view_params(),
         )
         self.tick_store = TickStore(cfg.tick_dir, cfg.symbol, cfg.tick_flush_every)
-        # Phase 2: signal detection + logging (NO trading). tf_seconds maps each timeframe label
+        # ATS Master Pattern detection + logging (NO trading). tf_seconds maps each timeframe label
         # to its length in seconds so the engine can stamp bar_close_epoch (the look-ahead firewall).
         tf_seconds = {
             tf: int(pd.Timedelta(cfg.timeframes[tf]).total_seconds())
             for tf in cfg.all_signal_timeframes
         }
-        self.signal_engine = SignalEngine(
-            cfg.symbol, params, cfg.signal_timeframes, tf_seconds,
-            cfg.signal_version, cfg.params_hash(),
+        self.ats_engine = AtsEngine(
+            cfg.symbol, cfg.ats_signal_params(), cfg.ats_htf, cfg.ats_ltf, tf_seconds,
+            cfg.ats_signal_version, cfg.ats_params_hash(),
         )
-        self.signal_store = SignalStore(cfg.signal_dir, cfg.symbol, cfg.signal_flush_every)
-        # ATS Master Pattern: a SEPARATE research stream (value-line + HTF→LTF pullback). Own engine
-        # + own store/dir so it never collides with the Phase-2 dedup key or data. NO trading.
-        self.ats_enabled = cfg.ats_enabled
-        if self.ats_enabled:
-            self.ats_engine = AtsEngine(
-                cfg.symbol, cfg.ats_signal_params(), cfg.ats_htf, cfg.ats_ltf, tf_seconds,
-                cfg.ats_signal_version, cfg.ats_params_hash(),
-            )
-            self.ats_store = SignalStore(cfg.ats_signal_dir, cfg.symbol, cfg.signal_flush_every)
+        self.ats_store = SignalStore(cfg.ats_signal_dir, cfg.symbol, cfg.signal_flush_every)
         self.last_quote: float | None = None
         self.last_epoch: int | None = None
         self.tick_count = 0
@@ -216,21 +205,14 @@ class Spine:
             log.error("API error: %s", msg["error"])
 
     def _run_signals(self, snap) -> None:
-        """Phase 2: feed the closed-bar snapshot to the detector and LOG any signals. No trading."""
-        for rec in self.signal_engine.on_snapshot(snap):
-            if self.signal_store.append(rec):
+        """Feed the closed-bar snapshot to the ATS detector and LOG any signals. No trading."""
+        for rec in self.ats_engine.on_snapshot(snap):
+            if self.ats_store.append(rec):
                 arrow = {"up": "^", "down": "v"}.get(rec.direction or "", "")
-                log.info("SIGNAL %s %s %s%s  bw_pct=%.2f z=%.2f price=%.5f bars=%s",
+                vl = f"{rec.value_line:.5f}" if rec.value_line is not None else "-"
+                log.info("ATS %s %s %s%s  value=%s price=%.5f bias=%s",
                          rec.timeframe, rec.phase, rec.direction or "-", arrow,
-                         rec.bw_percentile, rec.bbw_zscore, rec.price_at_signal, rec.contraction_bars)
-        if self.ats_enabled:
-            for rec in self.ats_engine.on_snapshot(snap):
-                if self.ats_store.append(rec):
-                    arrow = {"up": "^", "down": "v"}.get(rec.direction or "", "")
-                    vl = f"{rec.value_line:.5f}" if rec.value_line is not None else "-"
-                    log.info("ATS %s %s %s%s  value=%s price=%.5f bias=%s",
-                             rec.timeframe, rec.phase, rec.direction or "-", arrow,
-                             vl, rec.price_at_signal, rec.htf_bias or "-")
+                         vl, rec.price_at_signal, rec.htf_bias or "-")
 
     def _print_snapshot(self, snap) -> None:
         if not snap.frames:
@@ -255,13 +237,9 @@ async def main() -> None:
         await client.run(spine.on_connect)
     finally:
         spine.tick_store.close()
-        spine.signal_store.close()
-        ats_total = 0
-        if spine.ats_enabled:
-            spine.ats_store.close()
-            ats_total = spine.ats_store.total
-        log.info("flushed; %d ticks archived, %d signals + %d ATS signals logged this session",
-                 spine.tick_store.total, spine.signal_store.total, ats_total)
+        spine.ats_store.close()
+        log.info("flushed; %d ticks archived, %d ATS signals logged this session",
+                 spine.tick_store.total, spine.ats_store.total)
 
 
 if __name__ == "__main__":

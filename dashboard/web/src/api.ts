@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 export type Candle = { time: number; open: number; high: number; low: number; close: number };
 export type SignalRec = {
   timeframe: string; phase: string; direction: string | null; bar_epoch: number;
-  price_at_signal: number; bw_percentile: number; bbw_zscore: number; [k: string]: any;
+  price_at_signal: number; value_line?: number | null; htf_bias?: string | null; [k: string]: any;
 };
 export type Health = {
   symbol: string; ticks: number; signals: number; last_tick_age_s: number | null;
@@ -13,7 +13,6 @@ export type Backtest = {
   error?: string; verdict?: string; verdict_class?: string; caveat?: string; breakeven?: number;
   real?: { win_rate: number; total_pnl: number; roi_pct: number; n: number };
   null?: { win_rate: number; total_pnl: number; roi_pct: number; n: number } | null;
-  trend_n?: number; reversal_n?: number; trend_continuation?: number | null;
 };
 export type AtsValueLine = {
   epoch: number; value_line: number; tf: string;

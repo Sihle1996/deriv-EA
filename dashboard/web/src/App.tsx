@@ -74,7 +74,7 @@ export default function App() {
         {health && <span className={"badge " + (health.live ? "ok" : "bad")}>{health.live ? "LIVE" : "STALE"}</span>}
       </header>
 
-      <Chart candles={candles} signals={signals} liveBar={liveBar} tf={tf} ats={ats} mode={mode} />
+      <Chart candles={candles} liveBar={liveBar} tf={tf} ats={ats} mode={mode} />
 
       <div className="grid">
         <BacktestPanel bt={bt} />
@@ -104,12 +104,6 @@ function BacktestPanel({ bt }: { bt: Backtest | null }) {
         </tbody>
       </table>
       <p>break-even win rate <b>{pct(bt.breakeven)}%</b> · <span className={vcls}>{bt.verdict}</span></p>
-      {(bt.trend_n || bt.reversal_n) ? (
-        <p>after expansion: <b>{bt.trend_n}</b> trended / <b>{bt.reversal_n}</b> reversed
-          {bt.trend_continuation != null && <> · continuation <b>{(bt.trend_continuation * 100).toFixed(0)}%</b></>}
-          <span className="small"> (no momentum on an RNG; ratio also reflects threshold shapes — read the P&amp;L, not this)</span>
-        </p>
-      ) : null}
       <p className="small">{bt.caveat}</p>
     </Panel>
   );
@@ -159,19 +153,19 @@ function HealthPanel({ health }: { health: Health | null }) {
 
 function SignalsTable({ signals }: { signals: SignalRec[] }) {
   return (
-    <Panel title={`Recent signals (${signals.length})`}>
+    <Panel title={`Recent ATS signals (${signals.length})`}>
       <div className="scroll">
         <table className="sig">
-          <thead><tr><th>tf</th><th>phase</th><th>dir</th><th>price</th><th>bw %ile</th><th>z</th><th>bar epoch</th></tr></thead>
+          <thead><tr><th>tf</th><th>phase</th><th>dir</th><th>price</th><th>value line</th><th>HTF bias</th><th>bar epoch</th></tr></thead>
           <tbody>
             {signals.slice(0, 60).map((s, i) => (
               <tr key={i}>
                 <td>{s.timeframe}</td>
-                <td className={s.phase === "expansion" ? "ok" : ""}>{s.phase}</td>
+                <td className={s.phase === "entry" ? "ok" : ""}>{s.phase}</td>
                 <td>{s.direction ?? "—"}</td>
                 <td>{s.price_at_signal?.toFixed?.(5)}</td>
-                <td>{s.bw_percentile != null ? (s.bw_percentile * 100).toFixed(0) : "—"}</td>
-                <td>{s.bbw_zscore?.toFixed?.(2)}</td>
+                <td>{s.value_line != null ? s.value_line.toFixed(5) : "—"}</td>
+                <td>{s.htf_bias ?? "—"}</td>
                 <td>{s.bar_epoch}</td>
               </tr>
             ))}
