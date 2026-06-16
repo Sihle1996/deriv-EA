@@ -10,9 +10,16 @@ type Mode = "live" | "archive" | "deep";
 
 export default function App() {
   const [symbols, setSymbols] = useState<string[]>([]);
-  const [symbol, setSymbol] = useState("");
-  const [tf, setTf] = useState("1m");
-  const [mode, setMode] = useState<Mode>("live");
+  // Persist symbol/tf/mode across reloads (otherwise every refresh snaps back to 1m/live).
+  const [symbol, setSymbol] = useState(() => localStorage.getItem("symbol") || "");
+  const [tf, setTf] = useState(() => {
+    const s = localStorage.getItem("tf");
+    return s && TIMEFRAMES.includes(s) ? s : "1m";
+  });
+  const [mode, setMode] = useState<Mode>(() => {
+    const m = localStorage.getItem("mode");
+    return m === "archive" || m === "deep" || m === "live" ? m : "live";
+  });
   const [candles, setCandles] = useState<Candle[]>([]);
   const [liveBar, setLiveBar] = useState<Candle | null>(null);
   const [price, setPrice] = useState<number | null>(null);
@@ -23,10 +30,17 @@ export default function App() {
 
   useEffect(() => {
     getSymbols().then((s) => {
-      setSymbols(s.map((x) => x.symbol));
-      if (s[0]) setSymbol((cur) => cur || s[0].symbol);
+      const names = s.map((x) => x.symbol);
+      setSymbols(names);
+      // Keep the persisted symbol if it still exists; otherwise fall back to the first.
+      setSymbol((cur) => (cur && names.includes(cur) ? cur : names[0] || ""));
     });
   }, []);
+
+  // Remember the last symbol/tf/mode so a page reload restores them.
+  useEffect(() => { if (symbol) localStorage.setItem("symbol", symbol); }, [symbol]);
+  useEffect(() => { localStorage.setItem("tf", tf); }, [tf]);
+  useEffect(() => { localStorage.setItem("mode", mode); }, [mode]);
 
   useEffect(() => {
     if (!symbol) return;
