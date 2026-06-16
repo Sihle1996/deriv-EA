@@ -135,6 +135,27 @@ Two faithfulness fixes, both as switchable variants (old behaviour still selecta
   the old with-breakout pullback. `verify_ats.py` = 18/18 (4 new). Still NO public stop/target spec.
   Fleet restarted onto v3 (2026-06-16); v2 signals collected before then remain in the logs, versioned.
 
+**Research roadmap & DISCIPLINE (locked 2026-06-17, agreed with the user + an external GPT review):**
+The architecture is now AHEAD of the data — detector, validation, PBO, family-wise correction, funnel,
+multi-TF global view all exist, but the tradeable-entry sample is ~0 (real markets) / tiny (synthetics).
+**The bottleneck is observations, not code.** So: DO NOT add or activate strategy variants / sweeps
+until a meaningful sample exists. Every new parameter adds a degree of freedom (raises PBO / overfit
+risk) faster than evidence is arriving. Phased plan:
+- **Phase A (now):** just COLLECT. No rule changes, no new params. Let the funnel + entries accumulate.
+  Verify FIDELITY first (does the multi-TF global view show the value lines/pullbacks a discretionary
+  ATS trader would actually care about?) — fidelity is a separate, prior question to edge.
+- **Phase B (later, dormant):** add a variant FRAMEWORK but leave it OFF (default = current behaviour):
+  `bias_mode` (close_vs_value [current] | expansion_direction | expansion_plus_value) and
+  `value_line_persistence` (until_next_contraction [current] | expire_after_n_bars | expire_after_k_atr).
+  Implement ≠ activate. No tuning, no sweeps.
+- **Phase C (n>100 real entries):** activate the variants INSIDE validation only — current vs variants
+  judged by permutation p / OOS / PBO / deflated Sharpe. Let the statistics pick; don't pre-optimise.
+
+**HIDDEN HYPOTHESIS to make explicit in Phase B (do not forget):** the value line currently persists
+**until the next contraction overwrites it** — there is no decay/expiry. That is an untested assumption
+that never enters the PBO accounting today. Phase B must turn it into the explicit `value_line_persistence`
+param so validation can judge it. (GPT review flags this as likely higher-impact than the bias definition.)
+
 **Gate before trading (locked):** >500 reviewed ATS entries AND `validate_signals.py` showing a
 demonstrated, repeatable edge — permutation p<0.05 (family-wise corrected) AND OOS survival AND low PBO
 AND best Sharpe above the deflated/expected-max hurdle. Expected outcome on synthetics = NO edge → stay
