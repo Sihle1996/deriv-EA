@@ -59,7 +59,7 @@ table.sig tbody tr:nth-child(odd) { background: #0c1016; }
 .legend i.sq.grn { background: #26a69a; }
 .legend i.sq.rev { background: #a371f7; }
 .legend i.vline { width: 14px; height: 0; border-top: 2px solid #58a6ff; }
-.legend i.box { width: 11px; height: 9px; border: 1px solid #2d4a6b; }
+.legend i.box { width: 11px; height: 9px; border: 1px solid #3b6ea5; }
 .tip {
   position: absolute; pointer-events: none; z-index: 5;
   background: #161b22; border: 1px solid #30363d; border-radius: 6px;

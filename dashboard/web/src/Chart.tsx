@@ -52,15 +52,18 @@ export default function Chart({
     if (series.current && liveBar && tf === "1m" && mode === "live") series.current.update(liveBar as any);
   }, [liveBar, tf, mode]);
 
-  // ATS overlay (TradeATS style): each contraction = a faint BOX (top/bottom over its bars) with a
-  // VALUE LINE projected forward. One short line series per element (avoids the left-edge clamp of a
-  // single connected line). Only elements intersecting the visible candle window are drawn.
+  // ATS overlay (TradeATS "global view"): draw ONLY the HTF (15m) value lines — the few meaningful
+  // "point of origin" levels price reacts to — as a box + a value line projected forward. The 1m
+  // contractions (~100s) are intentionally NOT drawn: they'd bury the chart and aren't what you trade
+  // against. Shown on the HTF and LTF charts only. One short line series per element (no left-edge
+  // clamp); only elements intersecting the visible window are drawn.
   useEffect(() => {
     const c = chart.current;
     if (!c) return;
     for (const s of overlay.current) c.removeSeries(s);
     overlay.current = [];
-    if (!candles.length) return;
+    if (!candles.length || !ats) return;
+    if (tf !== ats.htf && tf !== ats.ltf) return;
     const lo = candles[0].time as number, hi = candles[candles.length - 1].time as number;
     const seg = (color: string, width: 1 | 2, t0: number, t1: number, v: number | null) => {
       if (v == null || t1 < lo || t0 > hi) return;
@@ -71,11 +74,11 @@ export default function Chart({
       s.setData([{ time: t0 as Time, value: v }, { time: t1 as Time, value: v }]);
       overlay.current.push(s);
     };
-    for (const v of ats?.value_lines ?? []) {
-      if (v.tf !== tf) continue;
-      seg("#58a6ff", 2, v.box_start, v.line_end, v.value_line);   // value line (point of origin)
-      seg("#2d4a6b", 1, v.box_start, v.box_end, v.box_high);      // box top
-      seg("#2d4a6b", 1, v.box_start, v.box_end, v.box_low);       // box bottom
+    for (const v of ats.value_lines) {
+      if (v.tf !== ats.htf) continue;                            // HTF levels only (declutter)
+      seg("#58a6ff", 2, v.box_start, v.line_end, v.value_line);  // value line (point of origin)
+      seg("#3b6ea5", 1, v.box_start, v.box_end, v.box_high);     // box top
+      seg("#3b6ea5", 1, v.box_start, v.box_end, v.box_low);      // box bottom
     }
   }, [ats, tf, candles]);
 
@@ -104,9 +107,9 @@ export default function Chart({
     <div className="chartwrap">
       <div ref={el} style={{ width: "100%" }} />
       <div className="legend">
-        <span><i className="vline" />value line (point of origin)</span>
+        <span><i className="vline" />{ats?.htf ?? "15m"} value line (point of origin)</span>
         <span><i className="box" />contraction box</span>
-        <span><i className="arr up" style={{ borderBottomColor: "#d2a8ff" }} />ATS pullback entry</span>
+        <span><i className="arr up" style={{ borderBottomColor: "#d2a8ff" }} />ATS pullback entry ({ats?.ltf ?? "1m"})</span>
       </div>
       {e && (
         <div className="tip" style={{ left: tip!.x + 14, top: tip!.y + 8 }}>
