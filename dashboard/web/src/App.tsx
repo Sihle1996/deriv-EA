@@ -69,6 +69,7 @@ export default function App() {
 
       <div className="grid">
         <BacktestPanel bt={bt} />
+        <AtsFunnelPanel ats={ats} />
         <HealthPanel health={health} />
       </div>
 
@@ -101,6 +102,35 @@ function BacktestPanel({ bt }: { bt: Backtest | null }) {
         </p>
       ) : null}
       <p className="small">{bt.caveat}</p>
+    </Panel>
+  );
+}
+
+function AtsFunnelPanel({ ats }: { ats: AtsOverlay | null }) {
+  if (!ats) return <Panel title="ATS funnel"><p>loading…</p></Panel>;
+  const f = ats.funnel;
+  const row = (label: string, n: number) => (
+    <tr><td>{label}</td><td style={{ textAlign: "right" }}><b>{n}</b></td></tr>
+  );
+  return (
+    <Panel title="ATS funnel — where the chain collapses">
+      <table>
+        <tbody>
+          {row(`${ats.htf} contractions`, f.htf_contractions)}
+          {row(`${ats.htf} breakouts`, f.htf_breakouts)}
+          {row(`${ats.ltf} contractions`, f.ltf_contractions)}
+          {row(`${ats.ltf} breakouts`, f.ltf_breakouts)}
+          {row("pullback candidates", f.pullback_candidates)}
+          {row("→ entries (HTF-aligned)", f.entries)}
+          {row("blocked: no HTF bias", f.blocked_no_bias)}
+          {row("blocked: counter-bias", f.blocked_counter)}
+        </tbody>
+      </table>
+      <p className="small">
+        Read top-down: if {ats.htf} contractions ≈ 0 the HTF rarely sets up; high "no HTF bias"
+        means the {ats.htf} bias is undefined when {ats.ltf} pulls back. Diagnoses the bottleneck
+        without changing any rule. Entries are selective by design — no edge implied.
+      </p>
     </Panel>
   );
 }

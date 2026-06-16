@@ -147,14 +147,18 @@ def t_gate_keeps_aligned() -> bool:
 def t_gate_blocks_counter() -> bool:
     eng = engine()
     _set_htf_bias_up(eng)                          # HTF bias up
-    out = _ltf_down_entry(eng)                     # LTF wants a DOWN entry -> must be dropped
-    return [r for r in out if r.phase == "entry"] == []
+    out = _ltf_down_entry(eng)                     # LTF wants a DOWN entry -> blocked (counter-bias)
+    blocked = [r for r in out if r.phase == "entry_blocked"]
+    return ([r for r in out if r.phase == "entry"] == []
+            and len(blocked) == 1 and blocked[0].htf_bias == "up")  # reason = opposing bias
 
 
 def t_gate_blocks_no_bias() -> bool:
     eng = engine()                                 # HTF never seen -> bias None
     out = _ltf_up_entry(eng)
-    return [r for r in out if r.phase == "entry"] == []
+    blocked = [r for r in out if r.phase == "entry_blocked"]
+    return ([r for r in out if r.phase == "entry"] == []
+            and len(blocked) == 1 and blocked[0].htf_bias == "none")
 
 
 def t_engine_context_passthrough() -> bool:

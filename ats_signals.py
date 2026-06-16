@@ -37,6 +37,8 @@ class AtsPhase(str, Enum):
 P_CONTRACTION = "contraction"
 P_BREAKOUT = "breakout"
 P_ENTRY = "entry"
+P_ENTRY_BLOCKED = "entry_blocked"   # a pullback fired but the HTF gate rejected it — logged for the
+                                    # funnel (NOT tradeable; backtest/validate filter phase == "entry")
 
 
 class AtsTimeframeDetector:
@@ -219,12 +221,15 @@ class AtsEngine:
             bias = self.htf_det.bias
             for rec in self.ltf_det.on_closed_bar(ltf_view):
                 if rec.phase == P_ENTRY:
-                    if bias is None or rec.direction != bias:
-                        continue                # HTF gate: drop counter-bias / no-bias entries
                     hv, hl = self.htf_det.value_line, self.htf_det.last_close
-                    rec = replace(rec, htf_bias=bias,
-                                  htf_dist_from_value_line=(abs(hl - hv) if hv is not None
-                                                            and hl is not None else None))
+                    hdist = abs(hl - hv) if hv is not None and hl is not None else None
+                    if bias is not None and rec.direction == bias:
+                        rec = replace(rec, htf_bias=bias, htf_dist_from_value_line=hdist)
+                    else:
+                        # HTF gate rejected it (no bias or counter-bias) — keep as a NON-tradeable
+                        # blocked candidate so the funnel shows where entries are filtered out.
+                        rec = replace(rec, phase=P_ENTRY_BLOCKED, htf_bias=(bias or "none"),
+                                      htf_dist_from_value_line=hdist)
                 self._add(rec, out)
         return out
 

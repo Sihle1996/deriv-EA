@@ -20,8 +20,15 @@ export type AtsEntry = {
   bar_epoch: number; direction: string | null; price: number | null; tf: string;
   value_line: number | null; htf_bias: string | null;
 };
+export type AtsFunnel = {
+  htf_contractions: number; htf_breakouts: number;
+  ltf_contractions: number; ltf_breakouts: number;
+  pullback_candidates: number; entries: number;
+  blocked_no_bias: number; blocked_counter: number;
+};
 export type AtsOverlay = {
-  symbol: string; htf: string; ltf: string; value_lines: AtsValueLine[]; entries: AtsEntry[];
+  symbol: string; htf: string; ltf: string;
+  value_lines: AtsValueLine[]; entries: AtsEntry[]; funnel: AtsFunnel;
 };
 
 const j = (url: string) => fetch(url).then((r) => r.json());

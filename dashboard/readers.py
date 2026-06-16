@@ -48,7 +48,27 @@ def ats_overlay(symbol: str, limit: int = 300) -> dict:
                 "value_line": s.get("value_line"), "htf_bias": s.get("htf_bias")}
                for s in sigs if s.get("phase") == "entry"]
     return {"symbol": symbol, "htf": htf, "ltf": ltf,
-            "value_lines": value_lines[-limit:], "entries": entries[-limit:]}
+            "value_lines": value_lines[-limit:], "entries": entries[-limit:],
+            "funnel": _ats_funnel(sigs, htf, ltf)}
+
+
+def _ats_funnel(sigs: list[dict], htf: str, ltf: str) -> dict:
+    """ATS funnel counts — shows WHERE the chain collapses (contraction → breakout → pullback →
+    entry) and WHY entries are gated (no HTF bias vs counter-bias), without touching any rule."""
+    from collections import Counter
+    c = Counter((s.get("timeframe"), s.get("phase")) for s in sigs)
+    blocked = [s for s in sigs if s.get("phase") == "entry_blocked"]
+    no_bias = sum(1 for s in blocked if s.get("htf_bias") in (None, "none"))
+    return {
+        "htf_contractions": c.get((htf, "contraction"), 0),
+        "htf_breakouts": c.get((htf, "breakout"), 0),
+        "ltf_contractions": c.get((ltf, "contraction"), 0),
+        "ltf_breakouts": c.get((ltf, "breakout"), 0),
+        "pullback_candidates": c.get((ltf, "entry"), 0) + c.get((ltf, "entry_blocked"), 0),
+        "entries": c.get((ltf, "entry"), 0),
+        "blocked_no_bias": no_bias,
+        "blocked_counter": len(blocked) - no_bias,
+    }
 
 
 def backtest_summary(symbol: str, payout: float | None = None, duration_bars: int | None = None) -> dict:
