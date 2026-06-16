@@ -5,7 +5,7 @@ import {
   getArchiveCandles, getAts, getBacktest, getCandles, getDeep, getHealth, getSignals, getSymbols, useLiveFeed,
 } from "./api";
 
-const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h"];
+const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"];
 type Mode = "live" | "archive" | "deep";
 
 export default function App() {
