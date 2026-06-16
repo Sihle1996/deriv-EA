@@ -1,8 +1,9 @@
-"""ATS Master Pattern detector regression — offline, deterministic, PASS/FAIL (like verify_signals.py).
+"""ATS Master Pattern detector regression — offline, deterministic, PASS/FAIL (like verify_feed.py).
 
 Feeds hand-built TFViews through ats_signals.py to prove the value-line + HTF→LTF pullback logic:
-contraction (inside bars), value-line midpoint, box breakout, pullback entry, the HTF-bias gate,
-warm-up gate, timeout, and engine dedup. No pandas, no network.
+contraction (swing-pivot LH/HL, signalled by view.contraction_now + box), value-line midpoint, plain
+box breakout, pullback entry, the HTF-bias gate, warm-up gate, timeout, and engine dedup. The pivot
+DETECTION itself (in candles._compute_view) is covered separately by t_pivot_*. No network.
 
 Run:  python verify_ats.py
 """
@@ -10,27 +11,28 @@ from __future__ import annotations
 
 import logging
 
+import pandas as pd
+
 from ats_signals import AtsEngine, AtsPhase, AtsTimeframeDetector
-from candles import TFView
+from candles import TFView, _compute_view
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("verify_ats")
 
-# Small, explicit params. max_contraction/entry kept short so timeouts fire quickly.
 P = {
-    "atr_period": 14, "ats_contraction_bars": 2, "ats_breakout_buffer_atr": 0.25,
-    "ats_pullback_tol_atr": 0.0, "ats_max_contraction_bars": 3, "ats_max_entry_bars": 3,
+    "atr_period": 14, "ats_pivot_lookback": 5, "ats_breakout_buffer_atr": 0.0,
+    "ats_pullback_tol_atr": 0.5, "ats_max_contraction_bars": 3, "ats_max_entry_bars": 3,
 }
 
 
-def view(epoch, close, *, inside_run, box_high=101.0, box_low=99.0, atr=1.0, warm=True):
-    """A warm (or non-warm) ATS TFView. high/low set wide so they don't interfere; the detector
-    reads close, inside_run, box_high/low, atr."""
+def view(epoch, close, *, contraction=False, box_high=101.0, box_low=99.0, atr=1.0, warm=True):
+    """A warm (or non-warm) ATS TFView. The detector reads close, contraction_now, box_high/low, atr."""
     return TFView(
         tf="1m", closed_bar_epoch=epoch, close=close, high=close + 1, low=close - 1, n_bars=200,
         atr=atr if warm else None,
-        inside_run=inside_run if warm else None,
-        box_high=box_high, box_low=box_low,
+        contraction_now=contraction,
+        box_high=box_high if contraction else None,
+        box_low=box_low if contraction else None,
     )
 
 
@@ -39,7 +41,6 @@ def det(tf="1m", secs=60) -> AtsTimeframeDetector:
 
 
 class Snap:
-    """Minimal MarketSnapshot stand-in: just a .views dict (tf -> TFView)."""
     def __init__(self, views):
         self.views = views
 
@@ -50,138 +51,153 @@ def engine() -> AtsEngine:
 
 # -- single-timeframe state machine --------------------------------------------------
 def t_warmup_gate() -> bool:
-    d = det()
-    return d.on_closed_bar(view(60, 100.0, inside_run=2, warm=False)) == []
+    return det().on_closed_bar(view(60, 100.0, contraction=True, warm=False)) == []
 
 
 def t_contraction_and_value_line() -> bool:
     d = det()
-    assert d.on_closed_bar(view(60, 100.0, inside_run=1)) == []     # only 1 inside bar -> nothing
-    out = d.on_closed_bar(view(120, 100.0, inside_run=2,
-                                box_high=101.0, box_low=99.0))       # 2 inside bars -> contraction
+    assert d.on_closed_bar(view(60, 100.0, contraction=False)) == []     # no pivot compression yet
+    out = d.on_closed_bar(view(120, 100.0, contraction=True, box_high=101.0, box_low=99.0))
     return (len(out) == 1 and out[0].phase == "contraction" and out[0].direction is None
-            and out[0].value_line == 100.0)                          # midpoint of 99..101
+            and out[0].value_line == 100.0)
 
 
 def t_value_line_offset_box() -> bool:
-    d = det()
-    out = d.on_closed_bar(view(120, 102.0, inside_run=2, box_high=104.0, box_low=100.0))
-    return len(out) == 1 and out[0].value_line == 102.0              # midpoint of 100..104
+    out = det().on_closed_bar(view(120, 102.0, contraction=True, box_high=104.0, box_low=100.0))
+    return len(out) == 1 and out[0].value_line == 102.0
 
 
-def t_breakout_up() -> bool:
+def t_breakout_up_plain() -> bool:
     d = det()
-    d.on_closed_bar(view(120, 100.0, inside_run=2, box_high=101.0, box_low=99.0, atr=1.0))
-    out = d.on_closed_bar(view(180, 102.0, inside_run=0))            # >101 + 0.25*1 = 101.25 -> up
+    d.on_closed_bar(view(120, 100.0, contraction=True, box_high=101.0, box_low=99.0))
+    out = d.on_closed_bar(view(180, 101.01, contraction=False))   # plain break: >101 (no ATR buffer)
     return len(out) == 1 and out[0].phase == "breakout" and out[0].direction == "up"
 
 
-def t_breakout_buffer_blocks() -> bool:
+def t_no_break_inside_box() -> bool:
     d = det()
-    d.on_closed_bar(view(120, 100.0, inside_run=2, box_high=101.0, box_low=99.0, atr=1.0))
-    out = d.on_closed_bar(view(180, 101.1, inside_run=0))            # 101.1 < 101.25 -> no breakout yet
+    d.on_closed_bar(view(120, 100.0, contraction=True, box_high=101.0, box_low=99.0))
+    out = d.on_closed_bar(view(180, 101.0, contraction=False))    # == box_high -> not a break
     return out == [] and d.phase is AtsPhase.CONTRACTION
 
 
-def t_breakout_down() -> bool:
+def t_breakout_down_plain() -> bool:
     d = det()
-    d.on_closed_bar(view(120, 100.0, inside_run=2, box_high=101.0, box_low=99.0, atr=1.0))
-    out = d.on_closed_bar(view(180, 98.0, inside_run=0))             # <99 - 0.25 = 98.75 -> down
+    d.on_closed_bar(view(120, 100.0, contraction=True, box_high=101.0, box_low=99.0))
+    out = d.on_closed_bar(view(180, 98.99, contraction=False))    # plain break: <99
     return len(out) == 1 and out[0].phase == "breakout" and out[0].direction == "down"
 
 
 def t_entry_pullback_up() -> bool:
     d = det()
-    d.on_closed_bar(view(120, 100.0, inside_run=2, box_high=101.0, box_low=99.0, atr=1.0))  # value 100
-    d.on_closed_bar(view(180, 102.0, inside_run=0))                  # breakout up
-    out = d.on_closed_bar(view(240, 99.9, inside_run=0))             # pull back to <= 100 -> entry up
+    d.on_closed_bar(view(120, 100.0, contraction=True, box_high=101.0, box_low=99.0))  # value 100
+    d.on_closed_bar(view(180, 102.0, contraction=False))          # breakout up
+    out = d.on_closed_bar(view(240, 99.9, contraction=False))     # pull back to <= 100+0.5 -> entry up
     return (len(out) == 1 and out[0].phase == "entry" and out[0].direction == "up"
             and out[0].bars_since_expansion == 1
             and abs(out[0].dist_from_value_line - 0.1) < 1e-9
-            and d.phase is AtsPhase.NO_SIGNAL)                       # one entry per episode -> reset
+            and d.phase is AtsPhase.NO_SIGNAL)
 
 
 def t_entry_timeout() -> bool:
     d = det()  # ats_max_entry_bars = 3
-    d.on_closed_bar(view(120, 100.0, inside_run=2, box_high=101.0, box_low=99.0, atr=1.0))
-    d.on_closed_bar(view(180, 102.0, inside_run=0))                  # breakout up
-    outs = [d.on_closed_bar(view(180 + 60 * i, 103.0, inside_run=0)) for i in range(1, 4)]  # never pulls back
+    d.on_closed_bar(view(120, 100.0, contraction=True, box_high=101.0, box_low=99.0))
+    d.on_closed_bar(view(180, 102.0, contraction=False))          # breakout up
+    outs = [d.on_closed_bar(view(180 + 60 * i, 103.0, contraction=False)) for i in range(1, 4)]
     return all(o == [] for o in outs) and d.phase is AtsPhase.NO_SIGNAL
 
 
 def t_refeed_dedup() -> bool:
     d = det()
-    r1 = d.on_closed_bar(view(120, 100.0, inside_run=2))
-    r2 = d.on_closed_bar(view(120, 100.0, inside_run=2))            # same epoch re-fed
+    r1 = d.on_closed_bar(view(120, 100.0, contraction=True))
+    r2 = d.on_closed_bar(view(120, 100.0, contraction=True))      # same epoch re-fed
     return len(r1) == 1 and r2 == []
 
 
 # -- engine: HTF-bias gate -----------------------------------------------------------
 def _set_htf_bias_up(eng: AtsEngine) -> None:
-    # HTF contraction sets value_line=99 (midpoint 98..100); the bar close 99.5 > 99 -> bias "up".
-    eng.on_snapshot(Snap({"15m": view(900, 99.5, inside_run=2, box_high=100.0, box_low=98.0)}))
+    # HTF contraction sets value_line=99 (midpoint 98..100); bar close 99.5 > 99 -> bias "up".
+    eng.on_snapshot(Snap({"15m": view(900, 99.5, contraction=True, box_high=100.0, box_low=98.0)}))
 
 
 def _ltf_up_entry(eng: AtsEngine):
-    eng.on_snapshot(Snap({"1m": view(60, 100.0, inside_run=2, box_high=101.0, box_low=99.0, atr=1.0)}))
-    eng.on_snapshot(Snap({"1m": view(120, 102.0, inside_run=0)}))   # breakout up
-    return eng.on_snapshot(Snap({"1m": view(180, 99.9, inside_run=0)}))  # pullback -> up entry
+    eng.on_snapshot(Snap({"1m": view(60, 100.0, contraction=True, box_high=101.0, box_low=99.0)}))
+    eng.on_snapshot(Snap({"1m": view(120, 102.0, contraction=False)}))      # breakout up
+    return eng.on_snapshot(Snap({"1m": view(180, 99.9, contraction=False)}))  # pullback -> up entry
 
 
 def _ltf_down_entry(eng: AtsEngine):
-    eng.on_snapshot(Snap({"1m": view(60, 100.0, inside_run=2, box_high=101.0, box_low=99.0, atr=1.0)}))
-    eng.on_snapshot(Snap({"1m": view(120, 98.0, inside_run=0)}))    # breakout down
-    return eng.on_snapshot(Snap({"1m": view(180, 100.1, inside_run=0)}))  # pullback -> down entry
+    eng.on_snapshot(Snap({"1m": view(60, 100.0, contraction=True, box_high=101.0, box_low=99.0)}))
+    eng.on_snapshot(Snap({"1m": view(120, 98.0, contraction=False)}))       # breakout down
+    return eng.on_snapshot(Snap({"1m": view(180, 100.1, contraction=False)}))  # pullback -> down entry
 
 
 def t_gate_keeps_aligned() -> bool:
-    eng = engine()
-    _set_htf_bias_up(eng)
-    out = _ltf_up_entry(eng)
-    entries = [r for r in out if r.phase == "entry"]
-    return (len(entries) == 1 and entries[0].direction == "up"
-            and entries[0].htf_bias == "up"
+    eng = engine(); _set_htf_bias_up(eng)
+    entries = [r for r in _ltf_up_entry(eng) if r.phase == "entry"]
+    return (len(entries) == 1 and entries[0].direction == "up" and entries[0].htf_bias == "up"
             and entries[0].htf_dist_from_value_line is not None)
 
 
 def t_gate_blocks_counter() -> bool:
-    eng = engine()
-    _set_htf_bias_up(eng)                          # HTF bias up
-    out = _ltf_down_entry(eng)                     # LTF wants a DOWN entry -> blocked (counter-bias)
+    eng = engine(); _set_htf_bias_up(eng)
+    out = _ltf_down_entry(eng)
     blocked = [r for r in out if r.phase == "entry_blocked"]
     return ([r for r in out if r.phase == "entry"] == []
-            and len(blocked) == 1 and blocked[0].htf_bias == "up")  # reason = opposing bias
+            and len(blocked) == 1 and blocked[0].htf_bias == "up")
 
 
 def t_gate_blocks_no_bias() -> bool:
-    eng = engine()                                 # HTF never seen -> bias None
+    eng = engine()  # HTF never seen -> bias None
     out = _ltf_up_entry(eng)
     blocked = [r for r in out if r.phase == "entry_blocked"]
     return ([r for r in out if r.phase == "entry"] == []
             and len(blocked) == 1 and blocked[0].htf_bias == "none")
 
 
-def t_engine_context_passthrough() -> bool:
-    # Even with no HTF bias, the LTF contraction/breakout CONTEXT records still pass through.
-    eng = engine()
-    c = eng.on_snapshot(Snap({"1m": view(60, 100.0, inside_run=2, box_high=101.0, box_low=99.0)}))
-    return len(c) == 1 and c[0].phase == "contraction"
+# -- pivot DETECTION (candles._compute_view) -----------------------------------------
+def _frame(highs, lows, closes):
+    idx = pd.to_datetime(range(60, 60 + 60 * len(highs), 60), unit="s", utc=True)
+    return pd.DataFrame({"open": closes, "high": highs, "low": lows, "close": closes}, index=idx)
+
+
+def t_pivot_contraction_detected() -> bool:
+    # Build bars whose pivot-highs step DOWN and pivot-lows step UP (a compression), length=2.
+    # highs: a peak at i=2 (110), a lower peak at i=6 (108); lows: a trough at i=2 (90), higher at i=6 (92).
+    p = {"atr_period": 3, "ats_pivot_lookback": 2}
+    highs = [100, 101, 110, 101, 100, 101, 108, 101, 100]
+    lows  = [99,  98,  90,  98,  99,  98,  92,  98,  99]
+    closes = [100] * 9
+    v = _compute_view(_frame(highs, lows, closes), "1m", p)
+    # at the last bar (i=8), pivot at i=6 (=8-2) is confirmed: lower-high(108<110) + higher-low(92>90)
+    return v is not None and v.contraction_now and v.box_high == 108.0 and v.box_low == 92.0
+
+
+def t_pivot_no_contraction_when_expanding() -> bool:
+    # Pivot-highs step UP (expansion, not compression) -> no contraction.
+    p = {"atr_period": 3, "ats_pivot_lookback": 2}
+    highs = [100, 101, 105, 101, 100, 101, 110, 101, 100]
+    lows  = [99,  98,  95,  98,  99,  98,  90,  98,  99]
+    closes = [100] * 9
+    v = _compute_view(_frame(highs, lows, closes), "1m", p)
+    return v is not None and not v.contraction_now
 
 
 CHECKS = [
     ("warmup_gate", t_warmup_gate),
     ("contraction_and_value_line", t_contraction_and_value_line),
     ("value_line_offset_box", t_value_line_offset_box),
-    ("breakout_up", t_breakout_up),
-    ("breakout_buffer_blocks", t_breakout_buffer_blocks),
-    ("breakout_down", t_breakout_down),
+    ("breakout_up_plain", t_breakout_up_plain),
+    ("no_break_inside_box", t_no_break_inside_box),
+    ("breakout_down_plain", t_breakout_down_plain),
     ("entry_pullback_up", t_entry_pullback_up),
     ("entry_timeout", t_entry_timeout),
     ("refeed_dedup", t_refeed_dedup),
     ("gate_keeps_aligned", t_gate_keeps_aligned),
     ("gate_blocks_counter", t_gate_blocks_counter),
     ("gate_blocks_no_bias", t_gate_blocks_no_bias),
-    ("engine_context_passthrough", t_engine_context_passthrough),
+    ("pivot_contraction_detected", t_pivot_contraction_detected),
+    ("pivot_no_contraction_when_expanding", t_pivot_no_contraction_when_expanding),
 ]
 
 
@@ -195,7 +211,7 @@ def main() -> None:
             log.info("  [ERROR] %s raised %s: %s", name, e.__class__.__name__, e)
     log.info("%s", "=" * 50)
     for name, ok in results.items():
-        log.info("  %-34s %s", name, "PASS" if ok else "FAIL")
+        log.info("  %-36s %s", name, "PASS" if ok else "FAIL")
     passed = sum(results.values())
     log.info("%s\n%d/%d checks passed", "=" * 50, passed, len(results))
     if passed != len(results):

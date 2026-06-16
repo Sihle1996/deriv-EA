@@ -56,7 +56,6 @@ class AtsTimeframeDetector:
         self.params_hash = params_hash
 
         self.phase = AtsPhase.NO_SIGNAL
-        self._armed = True
         self._last_epoch: int | None = None
         self.last_close: float | None = None
         # persistent reference (NOT cleared at episode end — value lines persist as S/R in ATS):
@@ -90,21 +89,15 @@ class AtsTimeframeDetector:
         self._last_epoch = view.closed_bar_epoch
         self.last_close = view.close
 
-        cbars = int(self.p["ats_contraction_bars"])
-
         if self.phase is AtsPhase.NO_SIGNAL:
-            if not self._armed:
-                # re-arm once the inside-bar coil has been broken (a normal/expansion bar appeared)
-                if view.inside_run == 0:
-                    self._armed = True
-                return []
-            if view.inside_run >= cbars:
+            # canonical FMP contraction: a swing-pivot lower-high + higher-low just confirmed
+            if view.contraction_now and view.box_high is not None:
                 return [self._enter_contraction(view)]
             return []
 
         if self.phase is AtsPhase.CONTRACTION:
             self.bars_in_contraction += 1
-            buf = self.p["ats_breakout_buffer_atr"] * self.c_atr
+            buf = self.p["ats_breakout_buffer_atr"] * self.c_atr   # buf=0 (default) => plain break
             up = view.close > self.box_high + buf
             down = view.close < self.box_low - buf
             if up or down:
@@ -153,7 +146,6 @@ class AtsTimeframeDetector:
     def _end_episode(self) -> None:
         # Keep value_line + last_close (persistent bias); reset only the episode machinery.
         self.phase = AtsPhase.NO_SIGNAL
-        self._armed = False
         self.box_high = self.box_low = self.c_atr = self.episode_id = None
         self.exp_dir = None
         self.bars_in_contraction = self.bars_since_exp = 0

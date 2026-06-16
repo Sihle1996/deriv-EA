@@ -177,19 +177,28 @@ none of which are bugs:
 The user trades the **TradeATS "Master Pattern"** by hand. It is now the ONLY methodology (the old
 breakout detector was removed). Plan: `.claude/plans/indexed-honking-mango.md`.
 
-The method (faithful to the indicator sources): **contraction** = inside bar(s) (lower-high AND
-higher-low; `ats_contraction_bars=1` = the documented single-inside-bar definition, matches the eye)
-→ freeze a **value line** at the box midpoint, projected forward; **expansion** = close clears the box
-by `ats_breakout_buffer_atr*ATR`; **entry** = on the LTF (1m), price PULLS BACK to its value line
-(within `ats_pullback_tol_atr*ATR`) AND the move agrees with the **HTF (15m) bias** (HTF close vs its
-own value line). The HTF gate is the heart of it; gated pullbacks are logged as `entry_blocked`.
+The method (CANONICAL, code-audited from LuxAlgo's open-source Pine — deep-research 2026-06-16, see
+below): **contraction** = a **swing-pivot compression** — a confirmed pivot-high LOWER than the prior
+pivot-high AND a pivot-low HIGHER than the prior pivot-low, over `ats_pivot_lookback` bars each side
+(`ta.pivothigh/ta.pivotlow`). NOT inside bars (`ats_v1` used inside bars and was wrong — too many,
+~100/archive; pivot-based `ats_v2` is selective, ~39). Freeze a **value line** at the box midpoint
+`(top+btm)/2` (confirmed correct), projected forward; **expansion** = a **plain** close break of a box
+boundary (audited: NO ATR buffer; `ats_breakout_buffer_atr=0`); **entry** = on the LTF (1m), price
+PULLS BACK to its value line (within `ats_pullback_tol_atr*ATR`) AND agrees with the **HTF (15m) bias**
+(HTF close vs its own value line). Gated pullbacks logged as `entry_blocked`.
+
+**Research caveat (important):** the audited indicators DRAW phases/boxes/lines only — **no public source
+specifies entry triggers, stop-loss, take-profit, R:R, or timeframe pairing** (those are TradeATS paid
+-course/marketing, unverifiable). So our HTF-gated pullback entry is OUR OWN honest heuristic, not "the"
+ATS rule. And on a CSPRNG synthetic none of it carries edge by construction — faithfulness is orthogonal
+to profitability.
 
 | File | Role (ATS) |
 |------|------|
 | `candles.py` | `_compute_view` (all pandas) computes ATR + inside-bar `inside_run` + contraction `box_high/low` at warm-up `atr_period+1`; `TFView.ats_warm` |
 | `ats_signals.py` | `AtsTimeframeDetector` (per-TF state machine, PERSISTENT value line for bias) + `AtsEngine` (HTF sets bias → gates LTF entries; emits `entry`/`entry_blocked`). `ats_v1` |
 | `signals.py` | `SignalRecord` dataclass only (schema v2; `value_line`/`htf_bias`/`episode_id` + entry-quality metadata) |
-| `config.py` | `ats_*` params, `ats_signal_params()`/`ats_params_hash()`, `ats_signal_dir`, `all_signal_timeframes={15m,1m}`, `view_params()`, `validate_ats_contraction_bars=(1,2,3,4)` |
+| `config.py` | `ats_*` params (`ats_pivot_lookback=5`, `ats_breakout_buffer_atr=0`), `ats_signal_params()`/`ats_params_hash()`, `ats_signal_dir`, `all_signal_timeframes={15m,1m}`, `view_params()`, `validate_ats_pivot_lookbacks=(3,5,8,13)` |
 | `main.py` | store over `all_signal_timeframes`; runs `AtsEngine` → `SignalStore(ats_signal_dir)` on candle close |
 | `verify_ats.py` | **13/13 PASS** — contraction/value-line/breakout/buffer/pullback-entry/HTF-gate(keeps aligned, blocks counter & no-bias)/timeout/dedup |
 | `backfill_signals.py` | regenerate the ATS stream from the gap-free tick archive (ATS by default, no flag) |
@@ -199,13 +208,14 @@ own value line). The HTF gate is the heart of it; gated pullbacks are logged as 
 **Anti-overfit guardrail (locked):** entry-quality metadata is for analysis only — any FILTER derived
 from it (e.g. "pullback within 3 bars") is a new config and MUST enter the PBO sweep, never a cherry-pick.
 
-**Result on the stpRNG archive (cbars=1, ~3000 candles):** 101 1m contractions / 6 15m / **42 entries**.
-Backtest 46.3% win (below 51.3% break-even) but beats random; **validate = NO EDGE** (permutation p=0.53,
-OOS doesn't survive, **PBO=1.00**, Sharpe below hurdle) — exactly correct for a CSPRNG control, and proof
-the harness is honest. **Real markets** (USD/JPY, Gold, NAS100) only have ~2.4h of session data each →
-15m HTF not yet warm → 0 entries → not testable yet; they accumulate slowly (market hours). The funnel
-panel shows where the chain collapses (`entry_blocked: no HTF bias` = HTF setup scarcity). Restart the
-bots after any detector change to collect live.
+**Result on the stpRNG archive (pivot `ats_v2`, lookback=5, ~3100 candles):** 39 1m contractions / 1 15m
+/ 16 pullback candidates → **3 entries** (most blocked by `no HTF bias` — HTF setup scarcity on a short
+archive). Pivot-based is far more selective than the old inside-bar `ats_v1` (was 101/3000). Earlier
+`ats_v1` run gave 42 entries and **validate = NO EDGE** (p=0.53, no OOS survival, PBO=1.00) — the correct
+CSPRNG-control result and proof the harness is honest; expect the same for `ats_v2` once n accumulates.
+**Real markets** (USD/JPY, Gold, NAS100) only have ~2.4h of session data each → 15m HTF not yet warm → 0
+entries → not testable yet (they accumulate slowly, market hours). The funnel panel shows where the chain
+collapses. Restart the bots after any detector change to collect live; signal_version bumped to `ats_v2`.
 
 ## Later: Phase 3+ (NOT started)
 Trade execution + risk layer (stake cap, daily-loss stop, kill switch) behind the new-Options-API

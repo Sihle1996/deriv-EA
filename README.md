@@ -67,18 +67,21 @@ confirm the exact Step Index code rather than trusting the `stpRNG` default.
 
 ### The ATS Master Pattern logic
 
-A faithful encoding of the TradeATS "Forex Master Pattern", pairing a higher timeframe (HTF, default
-15m) that sets directional bias with a lower timeframe (LTF, default 1m) that gives the entry:
-- **Contraction**: an inside bar (simultaneous lower-high AND higher-low) — `ats_contraction_bars`
-  of them — freezes a **value line** at the box midpoint, projected forward as a reference level.
-- **Expansion**: a later close clears the box by `ats_breakout_buffer_atr × ATR`.
+A faithful encoding of the TradeATS "Forex Master Pattern" (the contraction rule is code-audited from
+LuxAlgo's open-source Pine), pairing a higher timeframe (HTF, default 15m) that sets directional bias
+with a lower timeframe (LTF, default 1m) that gives the entry:
+- **Contraction**: a **swing-pivot compression** — a confirmed pivot-high lower than the prior
+  pivot-high AND a pivot-low higher than the prior pivot-low, over `ats_pivot_lookback` bars each side.
+  Freezes a **value line** at the box midpoint `(top+btm)/2`, projected forward as a reference level.
+- **Expansion**: a plain close break of a box boundary (audited: no ATR buffer).
 - **Entry**: on the LTF, price **pulls back to its value line** (within `ats_pullback_tol_atr × ATR`)
   in the breakout direction — and the entry fires **only if it agrees with the HTF bias** (HTF close
-  vs its own value line). Gated counter-bias / no-bias pullbacks are logged as `entry_blocked` for the
-  funnel. All params live in `config.py`.
+  vs its own value line). Gated pullbacks are logged as `entry_blocked` for the funnel. Params in `config.py`.
 
-> On a CSPRNG synthetic an edge is impossible by construction — the detector is faithful so the
-> harness can *measure* that honestly, not to imply profit.
+> The contraction/value-line/expansion rules are verifiable from open-source indicators; entry/stop/
+> target rules are NOT in any public source (TradeATS paid-course material), so the pullback entry is
+> our own heuristic. And on a CSPRNG synthetic no edge is possible by construction — the detector is
+> faithful so the harness can *measure* that honestly, not to imply profit.
 
 `review_signals.py` joins each logged signal against the archived ticks (look-ahead firewall:
 only ticks with `epoch > bar_close_epoch`), computes forward return / MFE / MAE / first-touch, and

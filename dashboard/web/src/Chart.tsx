@@ -52,11 +52,10 @@ export default function Chart({
     if (series.current && liveBar && tf === "1m" && mode === "live") series.current.update(liveBar as any);
   }, [liveBar, tf, mode]);
 
-  // ATS overlay (TradeATS "global view"): draw ONLY the HTF (15m) value lines — the few meaningful
-  // "point of origin" levels price reacts to — as a box + a value line projected forward. The 1m
-  // contractions (~100s) are intentionally NOT drawn: they'd bury the chart and aren't what you trade
-  // against. Shown on the HTF and LTF charts only. One short line series per element (no left-edge
-  // clamp); only elements intersecting the visible window are drawn.
+  // ATS overlay (TradeATS "global view"): each swing-pivot contraction = a box (top/bottom over its
+  // bars) + a VALUE LINE projected forward. Drawn for the timeframe being viewed (the pivot detector
+  // is selective, so these are meaningful swing compressions, not noise). One short line series per
+  // element (no left-edge clamp); only elements intersecting the visible window are drawn.
   useEffect(() => {
     const c = chart.current;
     if (!c) return;
@@ -75,7 +74,7 @@ export default function Chart({
       overlay.current.push(s);
     };
     for (const v of ats.value_lines) {
-      if (v.tf !== ats.htf) continue;                            // HTF levels only (declutter)
+      if (v.tf !== tf) continue;                                 // value lines for the viewed timeframe
       seg("#58a6ff", 2, v.box_start, v.line_end, v.value_line);  // value line (point of origin)
       seg("#3b6ea5", 1, v.box_start, v.box_end, v.box_high);     // box top
       seg("#3b6ea5", 1, v.box_start, v.box_end, v.box_low);      // box bottom
@@ -107,8 +106,8 @@ export default function Chart({
     <div className="chartwrap">
       <div ref={el} style={{ width: "100%" }} />
       <div className="legend">
-        <span><i className="vline" />{ats?.htf ?? "15m"} value line (point of origin)</span>
-        <span><i className="box" />contraction box</span>
+        <span><i className="vline" />value line (point of origin)</span>
+        <span><i className="box" />swing contraction box</span>
         <span><i className="arr up" style={{ borderBottomColor: "#d2a8ff" }} />ATS pullback entry ({ats?.ltf ?? "1m"})</span>
       </div>
       {e && (

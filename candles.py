@@ -44,13 +44,15 @@ class TFView:
     low: float
     n_bars: int                 # closed bars available (warm-up gate)
     atr: float | None = None
-    inside_run: int | None = None   # consecutive closed bars each with lower-high AND higher-low
-    box_high: float | None = None   # high over the last (ats_contraction_bars+1) closed bars
-    box_low: float | None = None    # low  over the last (ats_contraction_bars+1) closed bars
+    # Swing-pivot contraction (Forex Master Pattern, LuxAlgo-audited): contraction_now is True on the
+    # bar where a new pivot confirms a lower-high + higher-low compression; box = the bounding pivots.
+    contraction_now: bool = False
+    box_high: float | None = None   # bounding swing pivot high of the contraction
+    box_low: float | None = None    # bounding swing pivot low of the contraction
 
     @property
     def ats_warm(self) -> bool:
-        return self.atr is not None and self.inside_run is not None
+        return self.atr is not None
 
 
 @dataclass(frozen=True)
@@ -188,25 +190,32 @@ def _compute_view(df: pd.DataFrame, tf: str, p: dict) -> TFView | None:
                 high=float(high.iloc[-1]), low=float(low.iloc[-1]), n_bars=n)
 
     atr_period = int(p.get("atr_period", 14))
-    ats_cbars = int(p.get("ats_contraction_bars", 1))
+    length = int(p.get("ats_pivot_lookback", 5))
 
-    # ATR (Wilder ~ EMA with alpha=1/period) + inside-bar compression run + the contraction box.
+    # ATR (Wilder ~ EMA with alpha=1/period).
     if n >= atr_period + 1:
         prev_close = close.shift(1)
         tr = pd.concat([(high - low), (high - prev_close).abs(), (low - prev_close).abs()],
                        axis=1).max(axis=1)
-        atr = float(tr.ewm(alpha=1 / atr_period, adjust=False).mean().iloc[-1])
-        # inside_run = consecutive closed bars (ending now) each making a lower-high AND higher-low
-        # than the bar before it (ATS "contraction" = range squeezing from both sides).
-        hi_v, lo_v = high.values, low.values
-        run = 0
-        for i in range(len(hi_v) - 1, 0, -1):
-            if hi_v[i] < hi_v[i - 1] and lo_v[i] > lo_v[i - 1]:
-                run += 1
-            else:
-                break
-        # box = the outer range being contracted within: the reference bar + the required inside bars.
-        k = ats_cbars + 1
-        view.update(atr=atr, inside_run=int(run),
-                    box_high=float(high.iloc[-k:].max()), box_low=float(low.iloc[-k:].min()))
+        view["atr"] = float(tr.ewm(alpha=1 / atr_period, adjust=False).mean().iloc[-1])
+
+    # Swing-pivot CONTRACTION (canonical FMP, LuxAlgo-audited): find pivot highs/lows with `length`
+    # bars on each side (ta.pivothigh/ta.pivotlow). A contraction confirms on the bar where a NEW pivot
+    # just completed AND the latest pivot-high is a LOWER high while the latest pivot-low is a HIGHER
+    # low (range compressing from both sides). The box = those two bounding pivots; value line = its
+    # midpoint (set downstream). A pivot at index i is only confirmed `length` bars later, at i+length.
+    if n >= 2 * length + 1:
+        H, L = high.to_numpy(), low.to_numpy()
+        rmax = high.rolling(2 * length + 1, center=True).max().to_numpy()
+        rmin = low.rolling(2 * length + 1, center=True).min().to_numpy()
+        ph_idx = [i for i in range(length, n - length) if H[i] == rmax[i]]
+        pl_idx = [i for i in range(length, n - length) if L[i] == rmin[i]]
+        piv = n - 1 - length  # the bar whose pivot (if any) is confirmed at the current bar
+        new_pivot = (piv in ph_idx) or (piv in pl_idx)
+        if new_pivot and len(ph_idx) >= 2 and len(pl_idx) >= 2:
+            lower_high = H[ph_idx[-1]] < H[ph_idx[-2]]
+            higher_low = L[pl_idx[-1]] > L[pl_idx[-2]]
+            if lower_high and higher_low:
+                view.update(contraction_now=True,
+                            box_high=float(H[ph_idx[-1]]), box_low=float(L[pl_idx[-1]]))
     return TFView(**view)

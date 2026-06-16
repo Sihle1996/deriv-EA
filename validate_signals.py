@@ -115,16 +115,16 @@ def _real_trades(symbol, duration_bars, payout, stake, tf=None):
     return out, ep, px
 
 
-def _ats_pnl_series(symbol, ep, px, candles, contraction_bars, buffer, duration_bars, payout, stake):
+def _ats_pnl_series(symbol, ep, px, candles, pivot_lookback, buffer, duration_bars, payout, stake):
     """Per-config replay for the ATS PBO sweep: rebuild the store + HTF-gated AtsEngine with a given
-    ats_contraction_bars × breakout buffer, replay the 1m candles, and backtest each pullback ENTRY.
+    ats_pivot_lookback × breakout buffer, replay the 1m candles, and backtest each pullback ENTRY.
     Not vectorized (ATS entries are sparse and the engine is cheap), but it IS the real detector."""
     from ats_signals import AtsEngine
     from candles import MultiTimeframeStore
     p = dict(CONFIG.ats_signal_params())
-    p["ats_contraction_bars"] = contraction_bars
+    p["ats_pivot_lookback"] = pivot_lookback
     p["ats_breakout_buffer_atr"] = buffer
-    vp = dict(CONFIG.view_params()); vp["ats_contraction_bars"] = contraction_bars
+    vp = dict(CONFIG.view_params()); vp["ats_pivot_lookback"] = pivot_lookback
     store = MultiTimeframeStore(symbol, CONFIG.timeframes, base_granularity=CONFIG.base_granularity,
                                 signal_timeframes=CONFIG.all_signal_timeframes, signal_params=vp)
     tf_seconds = {tf: int(pd.Timedelta(CONFIG.timeframes[tf]).total_seconds())
@@ -217,17 +217,17 @@ def main() -> None:
     print(f"   {'OOS edge survived' if _winrate(OOS) > 0.5 and sum(r['pnl'] for r in OOS) > 0 else 'no OOS edge (in-sample result did not carry over)'}")
 
     # 3) PBO via CSCV over the ATS param sweep  +  4) deflated (expected-max) Sharpe.
-    # Sweeps the highest-leverage ATS param, ats_contraction_bars, × the breakout buffer, replaying
-    # the real HTF-gated engine per config.
+    # Sweeps the highest-leverage ATS param, ats_pivot_lookback, × the breakout buffer, replaying the
+    # real HTF-gated engine per config.
     from backfill_signals import build_candles
     candles = build_candles(ep, px)
     S = CONFIG.cscv_blocks
     span = max(1, hi - lo)
     sharpes = []
-    grid = [(cb, buf) for cb in CONFIG.validate_ats_contraction_bars for buf in (0.25, 0.5)]
+    grid = [(pl, buf) for pl in CONFIG.validate_ats_pivot_lookbacks for buf in (0.0, 0.25)]
     M = np.zeros((S, len(grid)))
-    for ci, (cb, buf) in enumerate(grid):
-        series = _ats_pnl_series(args.symbol, ep, px, candles, cb, buf,
+    for ci, (pl, buf) in enumerate(grid):
+        series = _ats_pnl_series(args.symbol, ep, px, candles, pl, buf,
                                  args.duration_bars, args.payout, args.stake)
         sharpes.append(sharpe([pnl for _, pnl in series]))
         for e, pnl in series:

@@ -66,20 +66,21 @@ class Config:
     walk_forward_oos_frac: float = 0.30  # fraction of (time-ordered) trades held out as out-of-sample
     cscv_blocks: int = 10              # S: time blocks for CSCV / Probability of Backtest Overfitting
 
-    ats_signal_version: str = "ats_v1"
+    ats_signal_version: str = "ats_v2"  # v2 = canonical swing-PIVOT contraction (was inside-bar v1)
     ats_htf: str = os.getenv("ATS_HTF", "15m")   # higher timeframe — sets directional bias
     ats_ltf: str = os.getenv("ATS_LTF", "1m")    # lower timeframe — gives the pullback entry
-    ats_contraction_bars: int = 1                # inside bars (lower-high AND higher-low) to confirm a
-                                                 # contraction. 1 = the documented single-inside-bar
-                                                 # definition (matches how it's marked by eye); 2+ is
-                                                 # stricter and detects far fewer coils
-    ats_breakout_buffer_atr: float = 0.25        # EXPANSION when close clears the box by this*ATR
+    # CONTRACTION = swing/pivot compression (LuxAlgo-audited): a confirmed pivot-high lower than the
+    # prior pivot-high AND a pivot-low higher than the prior pivot-low, over a pivot lookback. This is
+    # the canonical Forex Master Pattern definition — selective by nature (few, meaningful boxes).
+    ats_pivot_lookback: int = 5                  # bars each side for ta.pivothigh/low (the "Contraction
+                                                 # Detection Lookback"); larger = fewer, bigger coils
+    ats_breakout_buffer_atr: float = 0.0         # EXPANSION = plain box-boundary break (audited: no ATR
+                                                 # buffer). >0 only to experiment with a tolerance.
     ats_pullback_tol_atr: float = 0.5            # ENTRY when LTF close returns within this*ATR of value
-                                                 # (traders enter AS price approaches the line, not only
-                                                 # on an exact touch; 0.0 = require a full touch/cross)
+                                                 # (our own heuristic — no public ATS entry spec exists)
     ats_max_contraction_bars: int = 60           # abandon a contraction with no breakout within this
     ats_max_entry_bars: int = 20                 # abandon an expansion with no pullback within this
-    validate_ats_contraction_bars: tuple = (1, 2, 3, 4)  # PBO sweep — highest-leverage ATS param
+    validate_ats_pivot_lookbacks: tuple = (3, 5, 8, 13)  # PBO sweep — highest-leverage ATS param
 
     # --- storage ------------------------------------------------------------------
     data_dir: Path = ROOT / "data"
@@ -114,14 +115,14 @@ class Config:
         return tuple(sorted({self.ats_htf, self.ats_ltf}))
 
     def view_params(self) -> dict:
-        """Params the STORE needs to build TFViews (ATR + the inside-bar contraction box)."""
-        return {"atr_period": self.atr_period, "ats_contraction_bars": self.ats_contraction_bars}
+        """Params the STORE needs to build TFViews (ATR + the swing-pivot contraction box)."""
+        return {"atr_period": self.atr_period, "ats_pivot_lookback": self.ats_pivot_lookback}
 
     def ats_signal_params(self) -> dict:
         """Canonical ATS detector params — single source for AtsEngine and ats_params_hash."""
         return {
             "atr_period": self.atr_period,
-            "ats_contraction_bars": self.ats_contraction_bars,
+            "ats_pivot_lookback": self.ats_pivot_lookback,
             "ats_breakout_buffer_atr": self.ats_breakout_buffer_atr,
             "ats_pullback_tol_atr": self.ats_pullback_tol_atr,
             "ats_max_contraction_bars": self.ats_max_contraction_bars,

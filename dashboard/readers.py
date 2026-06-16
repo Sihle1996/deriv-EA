@@ -76,7 +76,7 @@ def _build_value_lines(sigs: list[dict], htf: str, ltf: str) -> list[dict]:
     FORWARD from the box — drawn the way TradeATS draws it (a box + a 'point of origin' line that
     extends right), not a single line connecting contractions. Projection runs to the next same-tf
     contraction, capped, so lines don't overlap or run forever."""
-    cbars = CONFIG.ats_contraction_bars
+    length = CONFIG.ats_pivot_lookback
     cons = [s for s in sigs if s.get("phase") == "contraction" and s.get("value_line") is not None
             and s.get("timeframe") in (htf, ltf)]
     by_tf: dict[str, list] = {}
@@ -91,7 +91,7 @@ def _build_value_lines(sigs: list[dict], htf: str, ltf: str) -> list[dict]:
             nxt = int(lst[i + 1]["bar_epoch"]) if i + 1 < len(lst) else be + 60 * secs
             out.append({
                 "tf": tfname, "epoch": be, "value_line": s["value_line"],
-                "box_start": be - cbars * secs, "box_end": be,
+                "box_start": be - 2 * length * secs, "box_end": be,
                 "box_high": s.get("contraction_high"), "box_low": s.get("contraction_low"),
                 "line_end": min(nxt, be + 120 * secs),   # project forward to next, capped
             })
