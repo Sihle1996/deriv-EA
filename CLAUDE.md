@@ -183,9 +183,17 @@ pivot-high AND a pivot-low HIGHER than the prior pivot-low, over `ats_pivot_look
 (`ta.pivothigh/ta.pivotlow`). NOT inside bars (`ats_v1` used inside bars and was wrong — too many,
 ~100/archive; pivot-based `ats_v2` is selective, ~39). Freeze a **value line** at the box midpoint
 `(top+btm)/2` (confirmed correct), projected forward; **expansion** = a **plain** close break of a box
-boundary (audited: NO ATR buffer; `ats_breakout_buffer_atr=0`); **entry** = on the LTF (1m), price
-PULLS BACK to its value line (within `ats_pullback_tol_atr*ATR`) AND agrees with the **HTF (15m) bias**
-(HTF close vs its own value line). Gated pullbacks logged as `entry_blocked`.
+boundary (audited: NO ATR buffer; `ats_breakout_buffer_atr=0`); **entry** = on the LTF (1m), gated by
+the **HTF bias** (HTF close vs its own value line). Gated candidates logged as `entry_blocked`.
+**HTF default = 5m** (was 15m): 15m so rarely forms a pivot contraction that entries never accumulate
+(1HZ50V: 26h → 0); 5m defines bias far more often → testable throughput. `ATS_HTF=15m` restores 15m.
+
+**Two entry modes** (`ats_entry_mode`, both UNVERIFIED — no public ATS entry spec):
+- `continuation` (default) — enter the WITH-HTF breakout's pullback to value, in the breakout direction.
+- `value_fade` — the Google/TradeATS rule: enter the COUNTER-HTF expansion *spike* immediately in the
+  HTF-bias direction (buy the discount / sell the premium, betting on a snap-back to value).
+A/B on stpRNG: `value_fade` ~2.5× more entries (structural — no pullback-timeout filter), but at n=3–10
+win rates are noise; only `validate_signals.py` on real-market n can compare them.
 
 **Research caveat (important):** the audited indicators DRAW phases/boxes/lines only — **no public source
 specifies entry triggers, stop-loss, take-profit, R:R, or timeframe pairing** (those are TradeATS paid
@@ -195,12 +203,12 @@ to profitability.
 
 | File | Role (ATS) |
 |------|------|
-| `candles.py` | `_compute_view` (all pandas) computes ATR + inside-bar `inside_run` + contraction `box_high/low` at warm-up `atr_period+1`; `TFView.ats_warm` |
-| `ats_signals.py` | `AtsTimeframeDetector` (per-TF state machine, PERSISTENT value line for bias) + `AtsEngine` (HTF sets bias → gates LTF entries; emits `entry`/`entry_blocked`). `ats_v1` |
+| `candles.py` | `_compute_view` (all pandas) computes ATR + swing-pivot `contraction_now` + `box_high/low` (bounding pivots) at warm-up `atr_period+1`; `TFView.ats_warm` |
+| `ats_signals.py` | `AtsTimeframeDetector` (per-TF state machine, PERSISTENT value line for bias, `continuation`/`value_fade` modes) + `AtsEngine` (HTF sets bias → gates LTF entries; emits `entry`/`entry_blocked`). `ats_v2` |
 | `signals.py` | `SignalRecord` dataclass only (schema v2; `value_line`/`htf_bias`/`episode_id` + entry-quality metadata) |
-| `config.py` | `ats_*` params (`ats_pivot_lookback=5`, `ats_breakout_buffer_atr=0`), `ats_signal_params()`/`ats_params_hash()`, `ats_signal_dir`, `all_signal_timeframes={15m,1m}`, `view_params()`, `validate_ats_pivot_lookbacks=(3,5,8,13)` |
+| `config.py` | `ats_*` params (`ats_pivot_lookback=5`, `ats_breakout_buffer_atr=0`, `ats_entry_mode`, `ats_htf=5m`), `ats_signal_params()`/`ats_params_hash()`, `ats_signal_dir`, `all_signal_timeframes={5m,1m}`, `view_params()`, `validate_ats_pivot_lookbacks=(3,5,8,13)` |
 | `main.py` | store over `all_signal_timeframes`; runs `AtsEngine` → `SignalStore(ats_signal_dir)` on candle close |
-| `verify_ats.py` | **13/13 PASS** — contraction/value-line/breakout/buffer/pullback-entry/HTF-gate(keeps aligned, blocks counter & no-bias)/timeout/dedup |
+| `verify_ats.py` | **14/14 PASS** — pivot-detection + contraction/value-line/plain-breakout/pullback-entry/HTF-gate(keeps aligned, blocks counter & no-bias)/timeout/dedup |
 | `backfill_signals.py` | regenerate the ATS stream from the gap-free tick archive (ATS by default, no flag) |
 | `backtest_signals.py` / `validate_signals.py` / `review_signals.py` | score the ATS stream by default (tradeable phase = `entry`). validate sweeps `ats_contraction_bars` in the PBO + prints a **family-wise (Bonferroni) p-threshold** + per-market n/low-power caveat |
 | `dashboard/*` | ATS-only UI: chart draws per-contraction **box + forward value line** + purple entry arrows (no old C/E/T/R); **ATS funnel** panel; **live/archive** toggle (archive resamples the tick archive so historical value lines render in-window); ATS backtest panel |

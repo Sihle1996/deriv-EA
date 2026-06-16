@@ -67,8 +67,14 @@ class Config:
     cscv_blocks: int = 10              # S: time blocks for CSCV / Probability of Backtest Overfitting
 
     ats_signal_version: str = "ats_v2"  # v2 = canonical swing-PIVOT contraction (was inside-bar v1)
-    ats_htf: str = os.getenv("ATS_HTF", "15m")   # higher timeframe — sets directional bias
-    ats_ltf: str = os.getenv("ATS_LTF", "1m")    # lower timeframe — gives the pullback entry
+    ats_htf: str = os.getenv("ATS_HTF", "5m")    # higher timeframe — sets directional bias. 5m (not
+                                                 # 15m) for research THROUGHPUT: 15m so rarely forms a
+                                                 # pivot contraction that entries almost never accumulate
+                                                 # (1HZ50V: 26h -> 0 entries). 5m defines bias far more
+                                                 # often so we reach a testable n. Set ATS_HTF=15m to
+                                                 # restore the wider pairing. Does NOT manufacture edge —
+                                                 # validate_signals still judges honestly.
+    ats_ltf: str = os.getenv("ATS_LTF", "1m")    # lower timeframe — gives the entry
     # CONTRACTION = swing/pivot compression (LuxAlgo-audited): a confirmed pivot-high lower than the
     # prior pivot-high AND a pivot-low higher than the prior pivot-low, over a pivot lookback. This is
     # the canonical Forex Master Pattern definition — selective by nature (few, meaningful boxes).
@@ -78,6 +84,11 @@ class Config:
                                                  # buffer). >0 only to experiment with a tolerance.
     ats_pullback_tol_atr: float = 0.5            # ENTRY when LTF close returns within this*ATR of value
                                                  # (our own heuristic — no public ATS entry spec exists)
+    # Entry variant (both are UNVERIFIED heuristics — no public ATS entry spec; tested via the harness):
+    #   "continuation" = enter the WITH-HTF breakout's pullback to value (our original).
+    #   "value_fade"   = enter the COUNTER-HTF expansion spike, in the HTF-bias direction (the
+    #                    Google/TradeATS "buy the discount / sell the premium, snap back to value" rule).
+    ats_entry_mode: str = os.getenv("ATS_ENTRY_MODE", "continuation")
     ats_max_contraction_bars: int = 60           # abandon a contraction with no breakout within this
     ats_max_entry_bars: int = 20                 # abandon an expansion with no pullback within this
     validate_ats_pivot_lookbacks: tuple = (3, 5, 8, 13)  # PBO sweep — highest-leverage ATS param
@@ -127,6 +138,7 @@ class Config:
             "ats_pullback_tol_atr": self.ats_pullback_tol_atr,
             "ats_max_contraction_bars": self.ats_max_contraction_bars,
             "ats_max_entry_bars": self.ats_max_entry_bars,
+            "ats_entry_mode": self.ats_entry_mode,
         }
 
     def ats_params_hash(self) -> str:

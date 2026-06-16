@@ -54,6 +54,7 @@ class AtsTimeframeDetector:
         self.p = params
         self.signal_version = signal_version
         self.params_hash = params_hash
+        self.entry_mode = params.get("ats_entry_mode", "continuation")
 
         self.phase = AtsPhase.NO_SIGNAL
         self._last_epoch: int | None = None
@@ -101,18 +102,26 @@ class AtsTimeframeDetector:
             up = view.close > self.box_high + buf
             down = view.close < self.box_low - buf
             if up or down:
-                return [self._enter_expansion(view, "up" if up else "down")]
+                break_dir = "up" if up else "down"
+                breakout = self._enter_expansion(view, break_dir)
+                if self.entry_mode == "value_fade":
+                    # Fade the spike: enter AGAINST the break (= toward HTF value), at the spike price.
+                    # Candidate dir = opposite of the break; the engine keeps it iff it matches HTF bias
+                    # (i.e. the break was counter-trend), else logs entry_blocked. Entry now, no wait.
+                    fade_dir = "down" if break_dir == "up" else "up"
+                    return [breakout, self._emit_entry(view, fade_dir, 0)]
+                return [breakout]
             if self.bars_in_contraction >= int(self.p["ats_max_contraction_bars"]):
                 self._end_episode()
             return []
 
-        # AtsPhase.EXPANSION — wait for a pullback to the value line in the breakout direction.
+        # AtsPhase.EXPANSION (continuation mode) — wait for a pullback to value in the breakout dir.
         self.bars_since_exp += 1
         tol = self.p["ats_pullback_tol_atr"] * self.c_atr
         pulled_back = (view.close <= self.value_line + tol) if self.exp_dir == "up" \
             else (view.close >= self.value_line - tol)
         if pulled_back:
-            return [self._make_entry(view)]
+            return [self._emit_entry(view, self.exp_dir, self.bars_since_exp)]
         if self.bars_since_exp >= int(self.p["ats_max_entry_bars"]):
             self._end_episode()
         return []
@@ -135,11 +144,12 @@ class AtsTimeframeDetector:
         self.bars_since_exp = 0
         return rec  # value_line + box + episode_id stay frozen through expansion
 
-    def _make_entry(self, view) -> SignalRecord:
-        """Emit the (HTF-ungated) pullback entry, then end the episode (one entry per episode, v1)."""
-        rec = self._make(view, P_ENTRY, self.exp_dir, self.bars_since_exp,
+    def _emit_entry(self, view, direction: str, bars_since: int) -> SignalRecord:
+        """Emit the (HTF-ungated) entry candidate in `direction`, then end the episode (one per
+        episode). The engine applies the HTF-bias gate and stamps htf_bias/htf_dist."""
+        rec = self._make(view, P_ENTRY, direction, bars_since,
                          dist=abs(view.close - self.value_line),
-                         bars_since_expansion=self.bars_since_exp)
+                         bars_since_expansion=bars_since)
         self._end_episode()
         return rec
 
