@@ -43,11 +43,12 @@ class Config:
     # Display/derived timeframes -> pandas resample rule. The base ("1m") resamples
     # to itself, which keeps the snapshot uniform.
     timeframes: dict[str, str] = field(
-        default_factory=lambda: {"1m": "1min", "5m": "5min", "15m": "15min"}
+        default_factory=lambda: {"1m": "1min", "5m": "5min", "15m": "15min", "1h": "1h"}
     )
 
-    history_count: int = 1000          # base candles to seed on connect (~16h of 1m)
-    max_base_rows: int = 5000          # cap base frame to bound memory during the soak
+    history_count: int = 5000          # base 1m candles to seed on connect (~83h) — enough depth for
+                                       # the 1h rung of the ladder to warm + form pivots on cold start
+    max_base_rows: int = 6000          # cap base frame to bound memory (> history_count, no instant trim)
 
     # --- ATS Master Pattern detector (ats_signals.py) — detect + LOG only, NO trading -------------
     # The ONLY methodology: TradeATS value-line + HTF→LTF pullback. Detector runs on candle CLOSE,
