@@ -42,3 +42,25 @@ config.)
 
 **Prior (honestly stated up front):** low probability it survives. Most likely outcome = the
 framework correctly dissolves an attractive false positive.
+
+## RESULT (2026-06-17, run once as registered)
+- 5m candles available: **2130 (~16.4 days)** — Deriv's ceiling for OTC_NDX; could NOT grow n further.
+- Entries **n=17**, win **82.4%**, ROI **+60.6%** (null win 41.2%, ROI −19.7%).
+- **Permutation p = 0.0050** → **PASS** (< 0.0125 family-wise).
+- OOS (last 30%): IS[n=11 win 90.9% ROI +77.3%] · **OOS[n=6 win 66.7% ROI +30.0%]** → **PASS** (as registered).
+- **Pre-registered verdict: BOTH criteria met → "INTERESTING".**
+
+**But — honest limitations that keep the real-edge probability LOW (do not over-read):**
+1. **n=17, OOS n=6.** The OOS arm is badly underpowered — 4/6 wins is p≈0.34 by binomial; the
+   registered OOS criterion was too lenient for that n. The OOS "pass" should carry little weight.
+2. **Selection bias not fully removed.** NAS100 was chosen as the *best of 4* in the deep scan; this
+   5m test is conditioned on that pick AND on the *same ~16-day window* at finer resolution — it is
+   **not an independent period**, so it isn't clean OOS confirmation.
+3. **No costs, close-to-close, no bracket.** Real NAS100 CFD spread + the structural-stop fragility
+   seen earlier could erase a 50-min close-to-close result.
+4. **Likely a trending-regime artifact:** value_fade buys discounts / sells premiums in the HTF-bias
+   direction; in a 16-day trend that keeps resuming, that "works" until the regime flips.
+
+**Graduation (as registered): it earns a deeper look — NOT trading, NOT tuning.** The decisive test
+is a **truly independent sample**: forward-collected NAS100 5m the model has never seen, costs
+modeled, evaluated identically. Freeze `ATS_VALUE_FADE` (hash `4b0f8ba6670d`); do NOT sweep configs.
